@@ -1,0 +1,57 @@
+{
+  "notice": "Synthetic classroom examples. Extraction and geocoder responses are fixed fixtures, not live API results.",
+  "scenarios": [
+    {
+      "id": "accepted",
+      "title": "A Texas report with a clear location",
+      "expected": "stored",
+      "post": "Flooding has closed roads across San Antonio, Texas. Residents report stranded vehicles.",
+      "extraction": {
+        "actionable": true,
+        "texas": true,
+        "summary": "Flooding has resulted in road closures and reports of stranded vehicles across San Antonio.",
+        "category": "flood",
+        "urgency": "moderate",
+        "location_text": "San Antonio, Texas",
+        "precision": "city"
+      },
+      "geocoder": {
+        "features": [{
+          "type": "Feature",
+          "properties": {"countrycode": "US", "state": "Texas", "type": "city", "name": "San Antonio"},
+          "geometry": {"type": "Point", "coordinates": [-98.4951405, 29.4246002]}
+        }]
+      }
+    },
+    {
+      "id": "irrelevant",
+      "title": "An unrelated Texas post",
+      "expected": "rejected",
+      "post": "Enjoying tacos and a football game with friends in San Antonio, Texas!",
+      "extraction": null,
+      "geocoder": null
+    },
+    {
+      "id": "ambiguous",
+      "title": "A report with an ambiguous place",
+      "expected": "ambiguous",
+      "post": "An emergency shelter has opened at Community Center in Texas after the flooding. No city or street address was provided.",
+      "extraction": {
+        "actionable": true,
+        "texas": true,
+        "summary": "A shelter is reported at a community center in Texas, but the city is unspecified.",
+        "category": "shelter",
+        "urgency": "low",
+        "location_text": "Community Center",
+        "precision": "place"
+      },
+      "geocoder": {
+        "features": [
+          {"type": "Feature", "properties": {"countrycode": "US", "state": "Texas", "type": "house", "name": "Community Center"}, "geometry": {"type": "Point", "coordinates": [-98.49, 29.42]}},
+          {"type": "Feature", "properties": {"countrycode": "US", "state": "Texas", "type": "house", "name": "Community Center"}, "geometry": {"type": "Point", "coordinates": [-97.74, 30.27]}}
+        ]
+      },
+      "note": "This deliberately permissive extraction fixture tests the downstream safeguard. Live Gemini may reject this post earlier. Both geocoder candidates are synthetic."
+    }
+  ]
+}

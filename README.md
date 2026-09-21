@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lone Star Support
 
-## Getting Started
+A Texas disaster-information project with a Next.js diagnostics app, a Python
+Bluesky worker, and an offline classroom demo.
 
-First, run the development server:
+## Current status
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+The backend for collecting and storing posts is built, and its parts have been
+tested separately. The offline demo is repeatable. Still to finish: showing live
+alerts on a map, automatically expiring old alerts, and demonstrating one real
+Bluesky post moving through the entire pipeline into Supabase.
+
+## Run the demo
+
+Requires **Python 3.12+**. From the project root:
+
+```powershell
+python workers/bluesky/demo.py
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open **http://127.0.0.1:8766**. Keep the terminal open; **Ctrl+C** stops it.
+No API keys, internet, Node setup, or extra Python packages are needed.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Run all three scenarios** shows an accepted Texas report, an irrelevant
+  post rejected by filtering, and an ambiguous location rejected before storage.
+- Expand the details to inspect extraction, coordinates, and the saved row.
+- Rerun the accepted scenario: it keeps one row instead of creating duplicates.
+- **Reset demo** clears only demo alerts and history.
+- If the port is busy, use `python workers/bluesky/demo.py --port 8767`
+  and open http://127.0.0.1:8767.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**Posts and Gemini/Photon responses are fixed examples.** The demo uses real
+filtering and validation functions, with separate local SQLite storage.
+It never writes to live Supabase. See [presentation steps](workers/bluesky/DEMO.md).
 
-## Learn More
+## Major code components
 
-To learn more about Next.js, take a look at the following resources:
+Live flow: `Bluesky → keyword filter → Gemini → Photon → validation → Supabase`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| File in `workers/bluesky/` | Role |
+| --- | --- |
+| `core.py` | Keyword filtering, location validation, and a persistent SQLite queue. |
+| `worker.py` | Bluesky listener, Gemini/Photon calls, retries, and Supabase writes. |
+| `demo.py` + `demo.html` | Offline presentation server, page, and isolated storage. |
+| `demo_scenarios.json` | Three synthetic posts and fixed service responses. |
+| `verify_storage.py` | Live insert/readback, duplicate/update, and cleanup checks. |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Gemini extracts summary, category, urgency, and **location text**. Photon supplies
+coordinates. The location must appear in the post, and there must be one valid
+Texas match. City coordinates are labeled approximate. In the demo:
 
-## Deploy on Vercel
+```python
+# After the keyword filter passes:
+extraction = validate_extraction(scenario["extraction"], scenario["post"])
+if extraction:
+    coords = resolve_feature(scenario["geocoder"], extraction)
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Supabase uses the unique post URI to update existing alerts. Coordinates are
+stored in longitude/latitude order:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```python
+params = {"on_conflict": "bluesky_uri"}
+geom = f"SRID=4326;POINT({coords[0]} {coords[1]})"
+```
+
+## Live worker and checks
+
+The live worker requires dependencies and local credentials. Follow
+[worker setup](workers/bluesky/README.md) to create the virtual environment and
+set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `GEMINI_API_KEY` in its
+Git-ignored `.env`. After setup:
+
+```powershell
+# Check services, then start the live worker:
+workers/bluesky/.venv/Scripts/python.exe workers/bluesky/worker.py --check
+workers/bluesky/.venv/Scripts/python.exe workers/bluesky/worker.py
+
+# Verify live storage using one temporary record that is removed afterward:
+workers/bluesky/.venv/Scripts/python.exe workers/bluesky/verify_storage.py
+
+# Test the offline demo without external services:
+python -m unittest discover -s workers/bluesky -p test_demo.py -v
+```
+
+Service access and Supabase storage checks passed. Demo checks covered scenarios,
+replay, reset, and browser controls. The keyword filter can miss some Texas posts;
+uncertain locations are skipped.
+
+## Next.js app
+
+The Next.js app shows weather/road diagnostics: run `npm ci`, then `npm run dev`,
+and open http://localhost:3000. It runs separately from the offline demo and does
+not yet display live Bluesky alerts.
