@@ -5,10 +5,9 @@ Bluesky worker, and an offline classroom demo.
 
 ## Current status
 
-The backend for collecting and storing posts is built, and its parts have been
-tested separately. The offline demo is repeatable. Still to finish: showing live
-alerts on a map, automatically expiring old alerts, and demonstrating one real
-Bluesky post moving through the entire pipeline into Supabase.
+- **Backend Ingestion**: Standalone Python workers under `workers/bluesky/` ingest, filter, geocode, and persist live Bluesky posts into Supabase PostGIS. The offline presentation demo is complete and repeatable.
+- **Geospatial Map Frontend**: The interactive MapLibre WebGL interface under `/test-map` is actively in progress (Phases 1–3 implemented). It renders live NWS weather alert polygons, TxDOT road closures, light/dark vector basemaps, and an inspection drawer with spatial point-in-polygon social filtering. See [test-map documentation](src/app/test-map/README.md).
+- **In Progress / Next Steps**: Hooking the live Supabase `social_alerts` table into the map (Phase 4), importing OpenStreetMap shelter POIs, and automated freshness expiry.
 
 ## Run the demo
 
@@ -37,13 +36,13 @@ It never writes to live Supabase. See [presentation steps](workers/bluesky/DEMO.
 
 Live flow: `Bluesky → keyword filter → Gemini → Photon → validation → Supabase`.
 
-| File in `workers/bluesky/` | Role |
-| --- | --- |
-| `core.py` | Keyword filtering, location validation, and a persistent SQLite queue. |
-| `worker.py` | Bluesky listener, Gemini/Photon calls, retries, and Supabase writes. |
-| `demo.py` + `demo.html` | Offline presentation server, page, and isolated storage. |
-| `demo_scenarios.json` | Three synthetic posts and fixed service responses. |
-| `verify_storage.py` | Live insert/readback, duplicate/update, and cleanup checks. |
+| File in `workers/bluesky/` | Role                                                                   |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `core.py`                  | Keyword filtering, location validation, and a persistent SQLite queue. |
+| `worker.py`                | Bluesky listener, Gemini/Photon calls, retries, and Supabase writes.   |
+| `demo.py` + `demo.html`    | Offline presentation server, page, and isolated storage.               |
+| `demo_scenarios.json`      | Three synthetic posts and fixed service responses.                     |
+| `verify_storage.py`        | Live insert/readback, duplicate/update, and cleanup checks.            |
 
 Gemini extracts summary, category, urgency, and **location text**. Photon supplies
 coordinates. The location must appear in the post, and there must be one valid
@@ -87,8 +86,20 @@ Service access and Supabase storage checks passed. Demo checks covered scenarios
 replay, reset, and browser controls. The keyword filter can miss some Texas posts;
 uncertain locations are skipped.
 
-## Next.js app
+## Next.js frontend
 
-The Next.js app shows weather/road diagnostics: run `npm ci`, then `npm run dev`,
-and open http://localhost:3000. It runs separately from the offline demo and does
-not yet display live Bluesky alerts.
+The Next.js frontend (App Router) provides diagnostic views and the primary geospatial disaster map:
+
+- **Setup**: Run `npm install` (or `npm ci`), then start the development server:
+  ```powershell
+  npm run dev
+  ```
+- **Disaster Map Interface (`/test-map`)**:
+  Open **http://localhost:3000/test-map**.
+  - **Live WebGL Visualization**: GPU-rendered NWS weather polygons (colored by severity) and TxDOT road closures with dashed outlines.
+  - **Theme-Aware Basemaps**: Dynamically switches between CARTO Dark Matter and Positron (Light) vector basemaps.
+  - **Inspection Drawer**: Click any alert or road segment to inspect official instructions, affected counties, countdown timers, and spatially matched community reports.
+  - **Telemetry Table**: A comprehensive inspector below the map displaying all Texas advisories (including non-polygon county bulletins) with full text search and click-to-fly navigation.
+  - Full details: [src/app/test-map/README.md](src/app/test-map/README.md).
+- **Diagnostics Feed (`/test-feed`)**:
+  Open **http://localhost:3000/test-feed** to test raw NWS and TxDOT feed responses against local coordinates.
