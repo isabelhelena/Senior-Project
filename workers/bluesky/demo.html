@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lone Star Support · Pipeline demo</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0c1423; --panel:#141f32; --line:#304159; --text:#f0f5fc; --muted:#b2c0d3; --accent:#7ed6c1; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 system-ui,sans-serif; }
+    main { max-width:1200px; margin:auto; padding:40px 24px 64px; } h1 { font-size:clamp(30px,4vw,48px); line-height:1.15; letter-spacing:-1.5px; margin:14px 0; }
+    h2 { font-size:22px; margin:0 0 14px; } h3 { font-size:18px; margin:8px 0; } p { margin:8px 0 16px; }
+    .eyebrow { color:var(--accent); text-transform:uppercase; letter-spacing:2px; font-size:12px; font-weight:700; }
+    .muted { color:var(--muted); } .notice { background:#26321f; color:#e2efc3; border:1px solid #5e713a; padding:12px 18px; border-radius:10px; margin:24px 0; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:24px 0; } button { font:inherit; font-weight:650; cursor:pointer; border:1px solid var(--line); border-radius:8px; background:#20334e; color:var(--text); padding:10px 16px; }
+    button.primary { background:var(--accent); color:#09251e; border-color:var(--accent); } button:hover { filter:brightness(1.15); } button:disabled { opacity:.5; cursor:wait; }
+    button:focus-visible,summary:focus-visible { outline:3px solid #a2dcff; outline-offset:4px; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; } .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px; }
+    .scenario { display:flex; flex-direction:column; } .scenario blockquote { margin:12px 0 22px; padding-left:14px; border-left:2px solid var(--line); color:var(--muted); flex:1; }
+    .badge { display:inline-block; font-size:12px; font-weight:700; padding:3px 9px; border-radius:20px; background:#293b54; color:#d5e3f5; }
+    .passed,.stored { background:#163f36; color:#a2ead5; } .rejected,.ambiguous { background:#493523; color:#ffd8a6; } .skipped { background:#293246; color:#c4cee0; }
+    .split { display:grid; grid-template-columns:1.35fr 1fr; gap:22px; margin-top:28px; align-items:start; }
+    .step { border-bottom:1px solid var(--line); padding:13px 0; } .step:last-child { border:0; } .step-title { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .step p { margin:6px 0 0; color:var(--muted); font-size:14px; } .empty { padding:20px 0; color:var(--muted); }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#0b1422; padding:14px; border-radius:8px; font-size:12px; }
+    details { margin-top:16px; } summary { cursor:pointer; color:var(--accent); } .alert { border-top:1px solid var(--line); margin-top:16px; padding-top:16px; }
+    .count { font-size:38px; font-weight:750; line-height:1; } .history { display:flex; flex-wrap:wrap; gap:8px; } .history button { font-size:13px; padding:6px 10px; }
+    #error { color:#ffd0c8; background:#4c2627; border-radius:8px; padding:14px; } [hidden] { display:none!important; }
+    footer { margin-top:36px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; } a { color:var(--accent); }
+    @media(max-width:850px) { .grid,.split { grid-template-columns:1fr; } main { padding:24px 16px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Lone Star Support / Milestone presentation</div>
+    <h1>From a post to a place.</h1>
+    <p class="muted">Follow three reports through filtering, extraction, location validation, and storage.</p>
+  </header>
+  <div class="notice"><strong>Offline demonstration.</strong> All posts are synthetic. Gemini and Photon responses are fixed examples. Validation runs for real; accepted alerts stay in a separate local demo database.</div>
+  <div class="toolbar">
+    <button class="primary" id="run-all">Run all three scenarios</button>
+    <button id="reset">Reset demo</button>
+    <span class="muted" id="status" role="status" aria-live="polite">Loading local demo…</span>
+  </div>
+  <p id="error" role="alert" hidden></p>
+  <section class="grid" id="scenarios" aria-label="Demo scenarios"></section>
+  <div class="split">
+    <section class="card" aria-labelledby="trace-heading">
+      <div class="eyebrow">Processing trace</div>
+      <h2 id="trace-heading">Choose a scenario to begin</h2>
+      <div id="trace"><p class="empty">Run a report to see which checks pass and where processing stops.</p></div>
+    </section>
+    <section class="card" aria-labelledby="storage-heading">
+      <div class="eyebrow">Isolated demo storage</div>
+      <h2 id="storage-heading">Accepted reports</h2>
+      <p><span class="count" id="count">0</span> <span class="muted">local rows</span></p>
+      <p class="muted">Replay the accepted scenario to demonstrate deduplication. The row count and ID stay the same.</p>
+      <div id="alerts"></div>
+    </section>
+  </div>
+  <section style="margin-top:28px" aria-labelledby="history-heading">
+    <h2 id="history-heading">Recent runs</h2>
+    <div class="history" id="history"></div>
+  </section>
+  <footer>
+    No Bluesky posts are published. No API keys, internet connection, or live Supabase writes are used by this demo.
+    The live worker and its verified Supabase storage path are separate.
+    San Antonio city coordinates: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>.
+  </footer>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  let current = null;
+  let busy = false;
+  const labels = { stored:'Stored locally', rejected:'Rejected', ambiguous:'Ambiguous location', passed:'Passed', skipped:'Skipped' };
+  function el(tag, text, cls) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (cls) node.className = cls;
+    return node;
+  }
+  function badge(value) { return el('span', labels[value] || value, 'badge ' + value); }
+  function details(title, value) {
+    const node = el('details'); node.append(el('summary', title), el('pre', JSON.stringify(value, null, 2))); return node;
+  }
+  function showTrace(run) {
+    $('trace-heading').textContent = run.title;
+    $('trace').replaceChildren(badge(run.outcome), el('p', run.post, 'muted'));
+    for (const step of run.stages) {
+      const row = el('div', undefined, 'step');
+      const title = el('div', undefined, 'step-title');
+      title.append(el('strong', step.name), badge(step.status));
+      row.append(title, el('p', step.detail)); $('trace').append(row);
+    }
+    if (run.note) $('trace').append(el('p', run.note, 'muted'));
+    if (run.extraction) $('trace').append(details('Inspect fixed extraction response', run.extraction));
+    if (run.coordinates) $('trace').append(details('Inspect validated coordinates', {longitude:run.coordinates[0], latitude:run.coordinates[1], precision:'Approximate city location'}));
+  }
+  function render(data) {
+    current = data;
+    $('scenarios').replaceChildren();
+    data.scenarios.forEach((scenario, index) => {
+      const card = el('article', undefined, 'card scenario');
+      card.append(el('span', 'SCENARIO 0' + (index + 1), 'eyebrow'), el('h3', scenario.title), el('blockquote', scenario.post));
+      const button = el('button', 'Run scenario');
+      button.disabled = busy;
+      button.addEventListener('click', () => perform(async () => {
+        render(await api('/api/demo/run/' + scenario.id, 'POST'));
+        $('status').textContent = 'Scenario complete: ' + labels[current.runs[0].outcome] + '.';
+      }));
+      card.append(button); $('scenarios').append(card);
+    });
+    $('count').textContent = data.alerts.length;
+    $('alerts').replaceChildren();
+    if (!data.alerts.length) $('alerts').append(el('p', 'No demo alerts stored yet.', 'empty'));
+    for (const alert of data.alerts) {
+      const card = el('div', undefined, 'alert');
+      card.append(el('span', 'DEMO · ' + alert.category + ' · ' + alert.urgency, 'badge'), el('p', alert.summary), details('Inspect local database row', alert));
+      $('alerts').append(card);
+    }
+    $('history').replaceChildren();
+    data.runs.forEach((run, index) => {
+      const button = el('button', (data.runs.length - index) + ' · ' + run.scenario_id + ' · ' + labels[run.outcome]);
+      button.addEventListener('click', () => showTrace(run)); $('history').append(button);
+    });
+    if (data.runs.length) showTrace(data.runs[0]);
+    else {
+      $('trace-heading').textContent = 'Choose a scenario to begin';
+      $('trace').replaceChildren(el('p', 'Run a report to see which checks pass and where processing stops.', 'empty'));
+    }
+  }
+  async function api(path, method = 'GET') {
+    const response = await fetch(path, {method, headers:method === 'POST' ? {'Content-Type':'application/json'} : {}, cache:'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'The local demo request failed.');
+    return data;
+  }
+  async function perform(action) {
+    if (busy) return;
+    busy = true; $('error').hidden = true;
+    document.querySelectorAll('button').forEach(button => button.disabled = true);
+    $('status').textContent = 'Running local demo…';
+    try { await action(); }
+    catch (error) { $('error').textContent = error.message + ' Check that demo.py is running, then reload this page.'; $('error').hidden = false; $('status').textContent = 'Demo stopped.'; }
+    finally { busy = false; document.querySelectorAll('button').forEach(button => button.disabled = false); }
+  }
+  $('run-all').addEventListener('click', () => perform(async () => {
+    for (const scenario of current.scenarios) render(await api('/api/demo/run/' + scenario.id, 'POST'));
+    $('status').textContent = 'Three scenarios complete. One accepted report; two rejected before storage.';
+  }));
+  $('reset').addEventListener('click', () => perform(async () => {
+    render(await api('/api/demo/reset', 'POST')); $('status').textContent = 'Demo reset. Ready to present again.';
+  }));
+  perform(async () => { render(await api('/api/demo')); $('status').textContent = 'Ready · offline demo'; });
+</script>
+</body>
+</html>

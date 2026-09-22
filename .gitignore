@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local Python worker environment and runtime files
+**/.venv/
+**/__pycache__/
+workers/bluesky/data/
+!workers/bluesky/.env.example
