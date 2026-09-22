@@ -1,167 +1,325 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import {
   Map,
   Source,
   Layer,
-  type LayerProps,
+  type MapRef,
   type MapLayerMouseEvent,
-  MapRef,
 } from "react-map-gl/maplibre";
 import { setWorkerUrl } from "maplibre-gl";
-import type { StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { useTheme } from "next-themes";
+import bbox from "@turf/bbox";
+import { Loader2, AlertCircle } from "lucide-react";
 
-setWorkerUrl("/maplibre-gl-worker.mjs");
+import type { UnifiedHazard } from "@/types/hazard";
+import {
+  normalizeNwsAlert,
+  normalizeTxDotRoad,
+  hazardsToGeoJson,
+} from "@/lib/normalizers";
+import {
+  nwsHazardFillLayer,
+  nwsHazardOutlineLayer,
+  txdotRoadLayer,
+  socialAlertsPointLayer,
+} from "./MapLayers";
+import { HazardDrawer } from "./HazardDrawer";
+import { AlertFeedTable } from "./AlertFeedTable";
+import { MapControls } from "./MapControls";
+import { LayerControlDock, type LayerVisibility } from "./LayerControlDock";
+import { MOCK_SOCIAL_ALERTS } from "../data/mockSocialAlerts";
 
-const hardcodedHazard = {
-  type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      properties: {
-        id: "demo-1",
-        severity: "Severe",
-        event: "Flash Flood Warning",
-      },
-      geometry: {
-        type: "Polygon",
-        coordinates: [
-          [
-            [-98.95, 29.05],
-            [-98.05, 29.05],
-            [-98.05, 29.85],
-            [-98.95, 29.85],
-            [-98.95, 29.05],
-          ],
-        ],
-      },
-    },
-  ],
-};
+if (typeof window !== "undefined") {
+  setWorkerUrl("/maplibre-gl-worker.mjs");
+}
 
-const hardcodedPOI = {
-  type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      properties: { name: "Downtown Shelter", type: "shelter" },
-      geometry: { type: "Point", coordinates: [-98.5, 29.45] },
-    },
-  ],
-};
+const CARTO_DARK =
+  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const CARTO_LIGHT =
+  "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
-const BASEMAP_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    osm: {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "© OpenStreetMap contributors",
-    },
-  },
-  layers: [
-    {
-      id: "osm",
-      type: "raster",
-      source: "osm",
-    },
-  ],
-};
-
-const hazardFillLayer: LayerProps = {
-  id: "hazard-fill",
-  type: "fill",
-  filter: ["==", "$type", "Polygon"],
-  layout: { visibility: "visible" },
-  paint: { "fill-color": "#ff00ff", "fill-opacity": 0.45 },
-};
-
-const hazardOutlineLayer: LayerProps = {
-  id: "hazard-outline",
-  type: "line",
-  filter: ["==", "$type", "Polygon"],
-  layout: { visibility: "visible" },
-  paint: { "line-color": "#b91c1c", "line-width": 4 },
-};
-
-const poiLayer: LayerProps = {
-  id: "poi-points",
-  type: "circle",
-  filter: ["==", "$type", "Point"],
-  layout: { visibility: "visible" },
-  paint: {
-    "circle-radius": 14,
-    "circle-color": "#1d4ed8",
-    "circle-stroke-width": 3,
-    "circle-stroke-color": "#ffffff",
-  },
+// Default Texas center viewport
+const TEXAS_VIEWPORT = {
+  longitude: -99.9018,
+  latitude: 31.5,
+  zoom: 6,
 };
 
 export default function CrisisMap() {
-  console.log("CrisisMap is rendering");
-  const [selected, setSelected] = useState<string | null>(null);
+  const mapRef = useRef<MapRef>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { resolvedTheme } = useTheme();
 
-  const handleClick = (e: MapLayerMouseEvent) => {
+  // State
+  const [hazards, setHazards] = useState<UnifiedHazard[]>([]);
+  const [selectedHazard, setSelectedHazard] = useState<UnifiedHazard | null>(
+    null,
+  );
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Layer visibility toggles
+  const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({
+    nws: true,
+    txdot: true,
+    social: true,
+  });
+
+  const mapStyle = resolvedTheme === "light" ? CARTO_LIGHT : CARTO_DARK;
+
+  const fetchTelemetry = useCallback(async () => {
+    setError(null);
+    try {
+      const [nwsRes, txdotRes] = await Promise.allSettled([
+        fetch("/api/alerts"),
+        fetch("/api/road-conditions"),
+      ]);
+
+      const loadedHazards: UnifiedHazard[] = [];
+
+      if (nwsRes.status === "fulfilled" && nwsRes.value.ok) {
+        const nwsData = await nwsRes.value.json();
+        if (Array.isArray(nwsData.features)) {
+          nwsData.features.forEach((feat: any) => {
+            loadedHazards.push(normalizeNwsAlert(feat));
+          });
+        }
+      }
+
+      if (txdotRes.status === "fulfilled" && txdotRes.value.ok) {
+        const txdotData = await txdotRes.value.json();
+        if (Array.isArray(txdotData.features)) {
+          txdotData.features.forEach((feat: any, idx: number) => {
+            loadedHazards.push(normalizeTxDotRoad(feat, idx));
+          });
+        }
+      }
+
+      setHazards(loadedHazards);
+    } catch (err) {
+      console.error("Telemetry fetch error:", err);
+      setError("Failed to load active disaster telemetry.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTelemetry();
+  }, [fetchTelemetry]);
+
+  const nwsGeoJson = useMemo(() => {
+    return hazardsToGeoJson(hazards.filter((h) => h.source === "nws"));
+  }, [hazards]);
+
+  const txdotGeoJson = useMemo(() => {
+    return hazardsToGeoJson(hazards.filter((h) => h.source === "txdot"));
+  }, [hazards]);
+
+  const socialGeoJson = useMemo(() => {
+    return {
+      type: "FeatureCollection" as const,
+      features: MOCK_SOCIAL_ALERTS.map((post) => ({
+        type: "Feature" as const,
+        id: post.id,
+        geometry: {
+          type: "Point" as const,
+          coordinates: post.coordinates,
+        },
+        properties: {
+          id: post.id,
+          summary: post.summary,
+          category: post.category,
+          urgency: post.urgency,
+          author: post.authorHandle,
+        },
+      })),
+    };
+  }, []);
+
+  const handleMapClick = (e: MapLayerMouseEvent) => {
     const feature = e.features?.[0];
-    setSelected(feature ? (feature.properties?.id as string) : null);
+    if (feature && feature.properties) {
+      const clickedId = feature.properties.id || feature.id;
+      const match = hazards.find((h) => h.id === clickedId);
+      if (match) {
+        setSelectedHazard(match);
+      } else {
+        const isSocial = MOCK_SOCIAL_ALERTS.find((s) => s.id === clickedId);
+        if (isSocial) {
+          setSelectedHazard({
+            id: isSocial.id,
+            source: "bluesky",
+            externalId: isSocial.blueskyUri,
+            headline: isSocial.summary,
+            category: isSocial.category,
+            urgency: isSocial.urgency,
+            hasGeometry: true,
+            geometry: { type: "Point", coordinates: isSocial.coordinates },
+            createdAt: isSocial.createdAt,
+          });
+        }
+      }
+    } else {
+      setSelectedHazard(null);
+    }
   };
 
-  const mapRef = useRef<MapRef>(null);
+  const flyToHazard = (hazard: UnifiedHazard) => {
+    setSelectedHazard(hazard);
+
+    if (hazard.hasGeometry && hazard.geometry) {
+      containerRef.current?.scrollIntoView({ behavior: "smooth" });
+
+      try {
+        const bounds = bbox(hazard.geometry);
+        const [minX, minY, maxX, maxY] = bounds;
+
+        if (minX === maxX && minY === maxY) {
+          mapRef.current?.flyTo({
+            center: [minX, minY],
+            zoom: 12,
+            bearing: 0,
+            duration: 1400,
+          });
+        } else {
+          mapRef.current?.fitBounds(
+            [
+              [minX, minY],
+              [maxX, maxY],
+            ],
+            {
+              padding: 90,
+              maxZoom: 13,
+              bearing: 0,
+              duration: 1400,
+            },
+          );
+        }
+      } catch (err) {
+        console.error("FlyTo error:", err);
+      }
+    }
+  };
+
+  const resetToTexas = () => {
+    mapRef.current?.flyTo({
+      center: [TEXAS_VIEWPORT.longitude, TEXAS_VIEWPORT.latitude],
+      zoom: TEXAS_VIEWPORT.zoom,
+      bearing: 0,
+      pitch: 0,
+      duration: 1200,
+    });
+  };
 
   return (
-    <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-      <Map
-        ref={mapRef}
-        initialViewState={{ longitude: -98.49, latitude: 29.42, zoom: 8 }}
-        mapStyle={BASEMAP_STYLE}
-        interactiveLayerIds={["hazard-fill"]}
-        onClick={handleClick}
-        onError={(e) => console.error("map error:", e)}
-        onLoad={() => {
-          const map = mapRef.current?.getMap();
-          console.log(
-            "layer ids:",
-            map?.getStyle()?.layers?.map((l) => l.id),
-          );
-          console.log("hazard source:", map?.getSource("hazard"));
-          console.log("poi source:", map?.getSource("poi"));
-        }}
-      >
-        <Source id="hazard" type="geojson" data={hardcodedHazard}>
-          <Layer {...hazardFillLayer} />
-          <Layer {...hazardOutlineLayer} />
-        </Source>
-        <Source id="poi" type="geojson" data={hardcodedPOI}>
-          <Layer {...poiLayer} />
-        </Source>
-      </Map>
-      {selected && (
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            left: 10,
-            background: "white",
-            padding: 8,
-            borderRadius: 4,
+    <div
+      ref={containerRef}
+      className="flex flex-col w-full min-h-screen bg-background text-foreground"
+    >
+      {/* Map Viewport */}
+      <div className="relative w-full h-[75vh] md:h-[80vh] bg-muted overflow-hidden border-b border-border">
+        {/* Modular Top Floating Dock */}
+        <MapControls
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            fetchTelemetry();
           }}
+          onResetView={resetToTexas}
+        />
+
+        {/* Modular Layer Toggle Dock */}
+        <LayerControlDock
+          visibility={layerVisibility}
+          nwsCount={nwsGeoJson.features.length}
+          txdotCount={txdotGeoJson.features.length}
+          socialCount={socialGeoJson.features.length}
+          onToggleLayer={(layerKey) =>
+            setLayerVisibility((prev) => ({
+              ...prev,
+              [layerKey]: !prev[layerKey],
+            }))
+          }
+        />
+
+        {/* Loading Overlay */}
+        {loading && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/50 backdrop-blur-xs">
+            <div className="flex items-center gap-2 p-3 bg-card border border-border rounded-xl shadow-xl">
+              <Loader2 className="w-4 h-4 text-primary animate-spin" />
+              <span className="text-xs font-medium">
+                Loading Texas Disaster Telemetry...
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Error Notification */}
+        {error && (
+          <div className="absolute top-4 right-4 z-30 flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/30 rounded-xl shadow-lg text-destructive text-xs">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* MapLibre Engine with Tilt Disabled */}
+        <Map
+          ref={mapRef}
+          initialViewState={TEXAS_VIEWPORT}
+          mapStyle={mapStyle}
+          maxPitch={0}
+          minPitch={0}
+          pitchWithRotate={false}
+          interactiveLayerIds={[
+            ...(layerVisibility.nws ? ["nws-hazard-fill"] : []),
+            ...(layerVisibility.txdot ? ["txdot-road-line"] : []),
+            ...(layerVisibility.social ? ["social-alerts-points"] : []),
+          ]}
+          onClick={handleMapClick}
+          cursor={selectedHazard ? "pointer" : "grab"}
         >
-          Clicked hazard: {selected}
-        </div>
-      )}
-      <pre
-        style={{
-          position: "absolute",
-          bottom: 0,
-          background: "white",
-          fontSize: 10,
-        }}
-      >
-        {JSON.stringify(hardcodedHazard)}
-      </pre>
+          {layerVisibility.nws && nwsGeoJson.features.length > 0 && (
+            <Source id="nws-hazards" type="geojson" data={nwsGeoJson}>
+              <Layer {...nwsHazardFillLayer} />
+              <Layer {...nwsHazardOutlineLayer} />
+            </Source>
+          )}
+
+          {layerVisibility.txdot && txdotGeoJson.features.length > 0 && (
+            <Source id="txdot-roads" type="geojson" data={txdotGeoJson}>
+              <Layer {...txdotRoadLayer} />
+            </Source>
+          )}
+
+          {layerVisibility.social && socialGeoJson.features.length > 0 && (
+            <Source id="social-alerts" type="geojson" data={socialGeoJson}>
+              <Layer {...socialAlertsPointLayer} />
+            </Source>
+          )}
+        </Map>
+
+        {/* Slide-out Hazard Inspection Drawer */}
+        <HazardDrawer
+          hazard={selectedHazard}
+          socialAlerts={MOCK_SOCIAL_ALERTS}
+          onClose={() => setSelectedHazard(null)}
+          onLocate={flyToHazard}
+        />
+      </div>
+
+      {/* Alert Feed & Data Inspector Table */}
+      <AlertFeedTable
+        hazards={hazards}
+        selectedHazardId={selectedHazard?.id}
+        onSelectHazard={(h) => setSelectedHazard(h)}
+        onLocate={flyToHazard}
+      />
     </div>
   );
 }
