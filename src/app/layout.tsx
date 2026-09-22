@@ -19,7 +19,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Lone Star Support | Texas Disaster Intelligence",
-  description: "Real-time Texas disaster information, road closures, and community resources",
+  description:
+    "Real-time Texas disaster information, road closures, and community resources",
 };
 
 export default function RootLayout({
@@ -37,11 +38,10 @@ export default function RootLayout({
         geistSans.variable,
         geistMono.variable,
         inter.variable,
-        "font-sans"
+        "font-sans",
       )}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <LocationProvider>{children}</LocationProvider>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <LocationProvider>{children}</LocationProvider>
         </ThemeProvider>
