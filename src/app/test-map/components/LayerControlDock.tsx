@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudRain, Construction, Layers, MessageSquare, TentTree } from "lucide-react";
+import { CloudSun, Construction, MessageSquare, TentTree } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export interface LayerVisibility {
@@ -10,98 +10,40 @@ export interface LayerVisibility {
   resources: boolean;
 }
 
+export type InformationSection = "weather" | "roads" | "resources" | "community";
+
 interface LayerControlDockProps {
-  visibility: LayerVisibility;
-  nwsCount: number;
-  txdotCount: number;
-  socialCount: number;
-  resourceCount: number;
-  onToggleLayer: (key: keyof LayerVisibility) => void;
+  activeSection: InformationSection | null;
+  onSelect: (section: InformationSection) => void;
 }
 
-export function LayerControlDock({
-  visibility,
-  nwsCount,
-  txdotCount,
-  socialCount,
-  resourceCount,
-  onToggleLayer,
-}: LayerControlDockProps) {
+const controls = [
+  { key: "weather", label: "Weather", icon: CloudSun },
+  { key: "roads", label: "Roads", icon: Construction },
+  { key: "resources", label: "Shelters & Aid", icon: TentTree },
+  { key: "community", label: "Community", icon: MessageSquare },
+] as const;
+
+export function LayerControlDock({ activeSection, onSelect }: LayerControlDockProps) {
   return (
-    <div
-      className="absolute bottom-3 left-3 z-10 flex w-[min(19rem,calc(100%-1.5rem))] flex-col gap-1.5 rounded-xl border border-border bg-card/95 p-2.5 text-sm shadow-lg backdrop-blur-md sm:bottom-4 sm:left-4"
-      aria-label="Map layers"
-    >
-      <div className="mb-0.5 flex items-center gap-2 px-1 py-1 font-semibold">
-        <Layers className="size-4" aria-hidden="true" /> Map layers
-      </div>
-
-      <Button
-        variant={visibility.nws ? "secondary" : "ghost"}
-        size="sm"
-        onClick={() => onToggleLayer("nws")}
-        aria-pressed={visibility.nws}
-        className={`min-h-11 w-full justify-between px-3 text-sm font-normal ${
-          !visibility.nws ? "opacity-60 text-muted-foreground" : ""
-        }`}
-      >
-        <span className="flex items-center gap-2">
-          <CloudRain className="size-4 text-orange-600 dark:text-orange-400" aria-hidden="true" />
-          Weather Alerts ({nwsCount})
-        </span>
-        <span className="text-xs font-medium">{visibility.nws ? "On" : "Off"}</span>
-      </Button>
-
-      <Button
-        variant={visibility.txdot ? "secondary" : "ghost"}
-        size="sm"
-        onClick={() => onToggleLayer("txdot")}
-        aria-pressed={visibility.txdot}
-        className={`min-h-11 w-full justify-between px-3 text-sm font-normal ${
-          !visibility.txdot ? "opacity-60 text-muted-foreground" : ""
-        }`}
-      >
-        <span className="flex items-center gap-2">
-          <Construction className="size-4 text-rose-600 dark:text-rose-400" aria-hidden="true" />
-          Road Closures ({txdotCount})
-        </span>
-        <span className="text-xs font-medium">{visibility.txdot ? "On" : "Off"}</span>
-      </Button>
-
-      <Button
-        variant={visibility.social ? "secondary" : "ghost"}
-        size="sm"
-        onClick={() => onToggleLayer("social")}
-        aria-pressed={visibility.social}
-        className={`min-h-11 w-full justify-between px-3 text-sm font-normal ${
-          !visibility.social ? "opacity-60 text-muted-foreground" : ""
-        }`}
-      >
-        <span className="flex items-center gap-2">
-          <MessageSquare className="size-4 text-sky-600 dark:text-sky-400" aria-hidden="true" />
-          Community Reports ({socialCount})
-        </span>
-        <span className="text-xs font-medium">{visibility.social ? "On" : "Off"}</span>
-      </Button>
-
-      <Button
-        variant={visibility.resources ? "secondary" : "ghost"}
-        size="sm"
-        disabled={resourceCount === 0}
-        onClick={() => onToggleLayer("resources")}
-        aria-pressed={resourceCount > 0 ? visibility.resources : undefined}
-        className={`min-h-11 w-full justify-between px-3 text-sm font-normal ${
-          !visibility.resources ? "opacity-60 text-muted-foreground" : ""
-        }`}
-      >
-        <span className="flex items-center gap-2">
-          <TentTree className="size-4 text-green-700 dark:text-green-400" aria-hidden="true" />
-          Shelters &amp; Aid ({resourceCount})
-        </span>
-        <span className="text-xs font-medium">
-          {resourceCount === 0 ? "Unavailable" : visibility.resources ? "On" : "Off"}
-        </span>
-      </Button>
-    </div>
+    <nav aria-label="Map information" className="absolute inset-x-3 bottom-3 z-10 mx-auto grid max-w-md grid-cols-4 gap-1.5 rounded-2xl bg-background/78 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:bg-background/72 dark:ring-white/10 sm:inset-x-auto sm:bottom-4 sm:left-4 sm:mx-0 sm:gap-2 sm:p-2">
+      {controls.map(({ key, label, icon: Icon }) => {
+        const active = activeSection === key;
+        return (
+          <Button
+            key={key}
+            type="button"
+            variant="ghost"
+            onClick={() => onSelect(key)}
+            aria-expanded={active}
+            aria-controls="map-information-panel"
+            className={`h-14 min-w-0 flex-col gap-1 rounded-xl px-1.5 text-[11px] font-medium leading-none sm:h-16 sm:min-w-20 sm:px-2 sm:text-xs ${active ? "bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background" : "text-foreground hover:bg-background/70"}`}
+          >
+            <Icon className="size-5" aria-hidden="true" />
+            <span className="max-w-full whitespace-normal text-center leading-tight">{label}</span>
+          </Button>
+        );
+      })}
+    </nav>
   );
 }

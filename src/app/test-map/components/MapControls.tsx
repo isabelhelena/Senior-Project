@@ -24,7 +24,7 @@ export function MapControls({
         size="icon"
         onClick={onRefresh}
         disabled={refreshing}
-        className="size-11 rounded-full border-border bg-card/95 shadow-md backdrop-blur-md hover:bg-muted"
+        className="size-11 rounded-full border-transparent bg-background/78 shadow-md ring-1 ring-black/5 backdrop-blur-xl hover:bg-background/90 dark:ring-white/10"
         title="Refresh map information"
         aria-label="Refresh map information"
       >
@@ -38,7 +38,7 @@ export function MapControls({
         variant="outline"
         size="icon"
         onClick={onResetView}
-        className="size-11 rounded-full border-border bg-card/95 shadow-md backdrop-blur-md hover:bg-muted"
+        className="size-11 rounded-full border-transparent bg-background/78 shadow-md ring-1 ring-black/5 backdrop-blur-xl hover:bg-background/90 dark:ring-white/10"
         title="Show all of Texas"
         aria-label="Show all of Texas"
       >

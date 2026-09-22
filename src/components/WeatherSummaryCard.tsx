@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { useCurrentWeather } from '@/hooks/use-current-weather';
 import {
   CloudSun,
   CloudRain,
@@ -15,17 +15,6 @@ import {
   MapPin
 } from 'lucide-react';
 
-interface WeatherData {
-  station: string;
-  stationName: string;
-  condition: string;
-  tempF: number | null;
-  windMph: number | null;
-  windDirection: number | null;
-  humidity: number | null;
-  timestamp: string;
-}
-
 interface WeatherSummaryCardProps {
   lat?: number;
   lng?: number;
@@ -34,47 +23,7 @@ interface WeatherSummaryCardProps {
 }
 
 export function WeatherSummaryCard({ lat, lng, locationLabel, compact = false }: WeatherSummaryCardProps) {
-  const [data, setData] = useState<WeatherData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadWeather() {
-      if (lat === undefined || lng === undefined) return;
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const res = await fetch(`/api/weather-current?lat=${lat}&lng=${lng}`);
-        const result = (await res.json()) as WeatherData & { error?: string };
-
-        if (!res.ok) {
-          throw new Error(result.error || 'Failed to load weather');
-        }
-
-        if (isMounted) {
-          setData(result);
-        }
-      } catch (err: unknown) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Error fetching weather');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadWeather();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [lat, lng]);
+  const { data, loading, error } = useCurrentWeather(lat, lng);
 
   const getWeatherIcon = (condition: string) => {
     const lower = condition.toLowerCase();

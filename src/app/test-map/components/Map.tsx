@@ -13,10 +13,13 @@ import { setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useTheme } from "next-themes";
 import bbox from "@turf/bbox";
-import { Loader2, AlertCircle, MapPin } from "lucide-react";
+import Link from "next/link";
+import { Loader2, AlertCircle, MapPin, TriangleAlert } from "lucide-react";
 
-import { WeatherSummaryCard } from "@/components/WeatherSummaryCard";
+import { buttonVariants } from "@/components/ui/button";
 import { useLocation } from "@/context/LocationContext";
+import { useCurrentWeather } from "@/hooks/use-current-weather";
+import { cn } from "@/lib/utils";
 import type { UnifiedHazard } from "@/types/hazard";
 import type { SocialAlert } from "@/types/hazard";
 import {
@@ -38,8 +41,13 @@ import {
 import { HazardDrawer } from "./HazardDrawer";
 import { AlertFeedTable } from "./AlertFeedTable";
 import { MapControls } from "./MapControls";
-import { LayerControlDock, type LayerVisibility } from "./LayerControlDock";
-import { ImportantInformation } from "./ImportantInformation";
+import {
+  LayerControlDock,
+  type InformationSection,
+  type LayerVisibility,
+} from "./LayerControlDock";
+import { CompactWeatherOverlay } from "./CompactWeatherOverlay";
+import { MapInformationPanel } from "./MapInformationPanel";
 import { SupportHeader } from "./SupportHeader";
 import { MOCK_SOCIAL_ALERTS } from "../data/mockSocialAlerts";
 
@@ -69,6 +77,10 @@ export default function CrisisMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const { resolvedTheme } = useTheme();
   const { location, setFromMap } = useLocation();
+  const weather = useCurrentWeather(
+    location.loading ? undefined : location.lat,
+    location.loading ? undefined : location.lng,
+  );
 
   // State
   const [hazards, setHazards] = useState<UnifiedHazard[]>([]);
@@ -78,6 +90,8 @@ export default function CrisisMap() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeSection, setActiveSection] =
+    useState<InformationSection | null>(null);
 
   // Layer visibility toggles
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({
@@ -193,10 +207,12 @@ export default function CrisisMap() {
       const clickedId = feature.properties.id || feature.id;
       const match = hazards.find((h) => h.id === clickedId);
       if (match) {
+        setActiveSection(null);
         setSelectedHazard(match);
       } else {
         const isSocial = MOCK_SOCIAL_ALERTS.find((s) => s.id === clickedId);
         if (isSocial) {
+          setActiveSection(null);
           setSelectedHazard({
             id: isSocial.id,
             source: "bluesky",
@@ -217,6 +233,7 @@ export default function CrisisMap() {
   };
 
   const flyToHazard = (hazard: UnifiedHazard) => {
+    setActiveSection(null);
     setSelectedHazard(hazard);
 
     if (hazard.hasGeometry && hazard.geometry) {
@@ -263,6 +280,14 @@ export default function CrisisMap() {
     });
   };
 
+  const locateSocialReport = (report: SocialAlert) => {
+    flyToHazard(socialReportToHazard(report));
+  };
+
+  const closeInformationPanel = useCallback(() => {
+    setActiveSection(null);
+  }, []);
+
   return (
     <div
       ref={containerRef}
@@ -270,8 +295,7 @@ export default function CrisisMap() {
     >
       <SupportHeader />
 
-      {/* Map Viewport */}
-      <section aria-label="Disaster information map" className="relative h-[68svh] min-h-[32rem] w-full overflow-hidden border-b border-border bg-muted md:h-[72svh]">
+      <section aria-label="Disaster information map" className="relative h-[calc(100svh-4rem)] min-h-[34rem] w-full overflow-hidden bg-muted">
         {/* Modular Top Floating Dock */}
         <MapControls
           refreshing={refreshing}
@@ -282,20 +306,28 @@ export default function CrisisMap() {
           onResetView={resetToTexas}
         />
 
-        {/* Modular Layer Toggle Dock */}
-        <LayerControlDock
-          visibility={layerVisibility}
-          nwsCount={nwsGeoJson.features.length}
-          txdotCount={txdotGeoJson.features.length}
-          socialCount={MOCK_SOCIAL_ALERTS.length}
-          resourceCount={resourceReports.length}
-          onToggleLayer={(layerKey) =>
-            setLayerVisibility((prev) => ({
-              ...prev,
-              [layerKey]: !prev[layerKey],
-            }))
-          }
+        <CompactWeatherOverlay
+          locationLabel={location.loading ? "Finding your location…" : location.city}
+          data={weather.data}
+          loading={location.loading || weather.loading}
+          error={weather.error}
         />
+
+        <LayerControlDock
+          activeSection={activeSection}
+          onSelect={(section) => {
+            setSelectedHazard(null);
+            setActiveSection((current) => current === section ? null : section);
+          }}
+        />
+
+        <Link
+          href="/report"
+          className={cn(buttonVariants(), "absolute bottom-24 right-3 z-10 min-h-12 gap-2 rounded-full px-5 shadow-xl sm:bottom-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2")}
+        >
+          <TriangleAlert aria-hidden="true" />
+          Report
+        </Link>
 
         {/* Loading Overlay */}
         {loading && (
@@ -384,46 +416,30 @@ export default function CrisisMap() {
           onClose={() => setSelectedHazard(null)}
           onLocate={flyToHazard}
         />
+
+        <MapInformationPanel
+          section={activeSection}
+          visibility={layerVisibility}
+          weather={weather}
+          locationLabel={location.city}
+          hazards={hazards}
+          communityReports={MOCK_SOCIAL_ALERTS}
+          resourceReports={nearbyResourceReports}
+          mapDataLoading={loading}
+          onClose={closeInformationPanel}
+          onToggleLayer={(layerKey) =>
+            setLayerVisibility((previous) => ({
+              ...previous,
+              [layerKey]: !previous[layerKey],
+            }))
+          }
+          onLocateHazard={flyToHazard}
+          onLocateReport={locateSocialReport}
+        />
       </section>
 
-      <main className="mx-auto w-full max-w-screen-2xl space-y-8 px-4 py-6 sm:px-6 sm:py-8">
-        <section aria-labelledby="current-conditions-heading" className="space-y-4">
-          <div>
-            <h2 id="current-conditions-heading" className="text-xl font-semibold tracking-tight">
-              Current conditions
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Weather near your selected location.
-            </p>
-          </div>
-          <div className="max-w-md">
-            {location.loading ? (
-              <div
-                role="status"
-                className="flex min-h-28 items-center justify-center gap-2 rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-xs"
-              >
-                <Loader2 className="size-5 animate-spin" aria-hidden="true" />
-                Updating your selected location…
-              </div>
-            ) : (
-              <WeatherSummaryCard
-                key={`${location.source}:${location.lat}:${location.lng}`}
-                lat={location.lat}
-                lng={location.lng}
-                locationLabel={location.city}
-                compact
-              />
-            )}
-          </div>
-        </section>
-
-        <ImportantInformation
-          hazards={hazards}
-          resourceReports={nearbyResourceReports}
-          loading={loading}
-        />
-
-        <details className="group overflow-hidden rounded-xl border border-border bg-card">
+      <main className="mx-auto w-full max-w-screen-2xl px-4 py-3 sm:px-6">
+        <details className="group overflow-hidden rounded-xl border border-border/60 bg-card">
           <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 font-semibold outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 sm:px-6 [&::-webkit-details-marker]:hidden">
             <span>
               Technical Details
@@ -465,5 +481,19 @@ function socialReportsToGeoJson(reports: SocialAlert[]) {
         author: post.authorHandle,
       },
     })),
+  };
+}
+
+function socialReportToHazard(report: SocialAlert): UnifiedHazard {
+  return {
+    id: report.id,
+    source: "bluesky",
+    externalId: report.blueskyUri,
+    headline: report.summary,
+    category: report.category,
+    urgency: report.urgency,
+    hasGeometry: true,
+    geometry: { type: "Point", coordinates: report.coordinates },
+    createdAt: report.createdAt,
   };
 }
