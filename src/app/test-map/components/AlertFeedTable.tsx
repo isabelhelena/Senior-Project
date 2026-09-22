@@ -4,16 +4,13 @@ import { useState, useMemo } from "react";
 import {
   MapPin,
   Search,
-  Filter,
   AlertTriangle,
   Clock,
-  ExternalLink,
   Info,
   Car,
   CloudRain,
-  Flame,
 } from "lucide-react";
-import type { UnifiedHazard, UrgencyLevel, DisasterCategory } from "@/types/hazard";
+import type { UnifiedHazard, UrgencyLevel } from "@/types/hazard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -236,4 +233,3 @@ export function AlertFeedTable({
     </div>
   );
 }
-

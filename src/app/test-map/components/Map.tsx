@@ -5,6 +5,7 @@ import {
   Map,
   Source,
   Layer,
+  Marker,
   type MapRef,
   type MapLayerMouseEvent,
 } from "react-map-gl/maplibre";
@@ -12,9 +13,16 @@ import { setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useTheme } from "next-themes";
 import bbox from "@turf/bbox";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, MapPin } from "lucide-react";
 
+import { WeatherSummaryCard } from "@/components/WeatherSummaryCard";
+import { useLocation } from "@/context/LocationContext";
 import type { UnifiedHazard } from "@/types/hazard";
+import type { SocialAlert } from "@/types/hazard";
+import {
+  distanceMiles,
+  isAidResourceReport,
+} from "@/lib/community-resources";
 import {
   normalizeNwsAlert,
   normalizeTxDotRoad,
@@ -25,11 +33,14 @@ import {
   nwsHazardOutlineLayer,
   txdotRoadLayer,
   socialAlertsPointLayer,
+  aidResourcesPointLayer,
 } from "./MapLayers";
 import { HazardDrawer } from "./HazardDrawer";
 import { AlertFeedTable } from "./AlertFeedTable";
 import { MapControls } from "./MapControls";
 import { LayerControlDock, type LayerVisibility } from "./LayerControlDock";
+import { ImportantInformation } from "./ImportantInformation";
+import { SupportHeader } from "./SupportHeader";
 import { MOCK_SOCIAL_ALERTS } from "../data/mockSocialAlerts";
 
 if (typeof window !== "undefined") {
@@ -48,10 +59,16 @@ const TEXAS_VIEWPORT = {
   zoom: 6,
 };
 
+const SELECTED_LOCATION_ZOOM = 10;
+
+type NwsFeature = Parameters<typeof normalizeNwsAlert>[0];
+type TxDotFeature = Parameters<typeof normalizeTxDotRoad>[0];
+
 export default function CrisisMap() {
   const mapRef = useRef<MapRef>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { resolvedTheme } = useTheme();
+  const { location, setFromMap } = useLocation();
 
   // State
   const [hazards, setHazards] = useState<UnifiedHazard[]>([]);
@@ -67,6 +84,7 @@ export default function CrisisMap() {
     nws: true,
     txdot: true,
     social: true,
+    resources: true,
   });
 
   const mapStyle = resolvedTheme === "light" ? CARTO_LIGHT : CARTO_DARK;
@@ -82,18 +100,18 @@ export default function CrisisMap() {
       const loadedHazards: UnifiedHazard[] = [];
 
       if (nwsRes.status === "fulfilled" && nwsRes.value.ok) {
-        const nwsData = await nwsRes.value.json();
+        const nwsData = (await nwsRes.value.json()) as { features?: NwsFeature[] };
         if (Array.isArray(nwsData.features)) {
-          nwsData.features.forEach((feat: any) => {
+          nwsData.features.forEach((feat) => {
             loadedHazards.push(normalizeNwsAlert(feat));
           });
         }
       }
 
       if (txdotRes.status === "fulfilled" && txdotRes.value.ok) {
-        const txdotData = await txdotRes.value.json();
+        const txdotData = (await txdotRes.value.json()) as { features?: TxDotFeature[] };
         if (Array.isArray(txdotData.features)) {
-          txdotData.features.forEach((feat: any, idx: number) => {
+          txdotData.features.forEach((feat, idx) => {
             loadedHazards.push(normalizeTxDotRoad(feat, idx));
           });
         }
@@ -102,7 +120,7 @@ export default function CrisisMap() {
       setHazards(loadedHazards);
     } catch (err) {
       console.error("Telemetry fetch error:", err);
-      setError("Failed to load active disaster telemetry.");
+      setError("We could not load the latest map information. Please try again.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -110,8 +128,26 @@ export default function CrisisMap() {
   }, []);
 
   useEffect(() => {
-    fetchTelemetry();
+    queueMicrotask(() => {
+      void fetchTelemetry();
+    });
   }, [fetchTelemetry]);
+
+  const moveToSelectedLocation = useCallback(() => {
+    if (location.loading) return;
+
+    mapRef.current?.flyTo({
+      center: [location.lng, location.lat],
+      zoom: SELECTED_LOCATION_ZOOM,
+      bearing: 0,
+      pitch: 0,
+      duration: 1200,
+    });
+  }, [location.lat, location.lng, location.loading]);
+
+  useEffect(() => {
+    moveToSelectedLocation();
+  }, [moveToSelectedLocation]);
 
   const nwsGeoJson = useMemo(() => {
     return hazardsToGeoJson(hazards.filter((h) => h.source === "nws"));
@@ -121,26 +157,35 @@ export default function CrisisMap() {
     return hazardsToGeoJson(hazards.filter((h) => h.source === "txdot"));
   }, [hazards]);
 
-  const socialGeoJson = useMemo(() => {
-    return {
-      type: "FeatureCollection" as const,
-      features: MOCK_SOCIAL_ALERTS.map((post) => ({
-        type: "Feature" as const,
-        id: post.id,
-        geometry: {
-          type: "Point" as const,
-          coordinates: post.coordinates,
-        },
-        properties: {
-          id: post.id,
-          summary: post.summary,
-          category: post.category,
-          urgency: post.urgency,
-          author: post.authorHandle,
-        },
-      })),
-    };
-  }, []);
+  const resourceReports = useMemo(
+    () => MOCK_SOCIAL_ALERTS.filter(isAidResourceReport),
+    [],
+  );
+
+  const communityReports = useMemo(
+    () =>
+      layerVisibility.resources
+        ? MOCK_SOCIAL_ALERTS.filter((report) => !isAidResourceReport(report))
+        : MOCK_SOCIAL_ALERTS,
+    [layerVisibility.resources],
+  );
+
+  const communityGeoJson = useMemo(
+    () => socialReportsToGeoJson(communityReports),
+    [communityReports],
+  );
+  const resourceGeoJson = useMemo(
+    () => socialReportsToGeoJson(resourceReports),
+    [resourceReports],
+  );
+  const nearbyResourceReports = useMemo(
+    () =>
+      resourceReports.filter(
+        (report) =>
+          distanceMiles([location.lng, location.lat], report.coordinates) <= 100,
+      ),
+    [location.lat, location.lng, resourceReports],
+  );
 
   const handleMapClick = (e: MapLayerMouseEvent) => {
     const feature = e.features?.[0];
@@ -167,6 +212,7 @@ export default function CrisisMap() {
       }
     } else {
       setSelectedHazard(null);
+      setFromMap(e.lngLat.lat, e.lngLat.lng);
     }
   };
 
@@ -220,10 +266,12 @@ export default function CrisisMap() {
   return (
     <div
       ref={containerRef}
-      className="flex flex-col w-full min-h-screen bg-background text-foreground"
+      className="flex min-h-screen w-full flex-col bg-background text-foreground"
     >
+      <SupportHeader />
+
       {/* Map Viewport */}
-      <div className="relative w-full h-[75vh] md:h-[80vh] bg-muted overflow-hidden border-b border-border">
+      <section aria-label="Disaster information map" className="relative h-[68svh] min-h-[32rem] w-full overflow-hidden border-b border-border bg-muted md:h-[72svh]">
         {/* Modular Top Floating Dock */}
         <MapControls
           refreshing={refreshing}
@@ -239,7 +287,8 @@ export default function CrisisMap() {
           visibility={layerVisibility}
           nwsCount={nwsGeoJson.features.length}
           txdotCount={txdotGeoJson.features.length}
-          socialCount={socialGeoJson.features.length}
+          socialCount={MOCK_SOCIAL_ALERTS.length}
+          resourceCount={resourceReports.length}
           onToggleLayer={(layerKey) =>
             setLayerVisibility((prev) => ({
               ...prev,
@@ -253,8 +302,8 @@ export default function CrisisMap() {
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/50 backdrop-blur-xs">
             <div className="flex items-center gap-2 p-3 bg-card border border-border rounded-xl shadow-xl">
               <Loader2 className="w-4 h-4 text-primary animate-spin" />
-              <span className="text-xs font-medium">
-                Loading Texas Disaster Telemetry...
+              <span className="text-sm font-medium">
+                Loading the latest map information…
               </span>
             </div>
           </div>
@@ -262,7 +311,7 @@ export default function CrisisMap() {
 
         {/* Error Notification */}
         {error && (
-          <div className="absolute top-4 right-4 z-30 flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/30 rounded-xl shadow-lg text-destructive text-xs">
+          <div role="alert" className="absolute left-3 right-3 top-16 z-30 flex items-center gap-2 rounded-xl border border-destructive/30 bg-card p-3 text-sm text-destructive shadow-lg sm:left-auto sm:right-4 sm:max-w-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -273,6 +322,7 @@ export default function CrisisMap() {
           ref={mapRef}
           initialViewState={TEXAS_VIEWPORT}
           mapStyle={mapStyle}
+          onLoad={moveToSelectedLocation}
           maxPitch={0}
           minPitch={0}
           pitchWithRotate={false}
@@ -280,6 +330,7 @@ export default function CrisisMap() {
             ...(layerVisibility.nws ? ["nws-hazard-fill"] : []),
             ...(layerVisibility.txdot ? ["txdot-road-line"] : []),
             ...(layerVisibility.social ? ["social-alerts-points"] : []),
+            ...(layerVisibility.resources ? ["aid-resource-points"] : []),
           ]}
           onClick={handleMapClick}
           cursor={selectedHazard ? "pointer" : "grab"}
@@ -297,10 +348,32 @@ export default function CrisisMap() {
             </Source>
           )}
 
-          {layerVisibility.social && socialGeoJson.features.length > 0 && (
-            <Source id="social-alerts" type="geojson" data={socialGeoJson}>
+          {layerVisibility.social && communityGeoJson.features.length > 0 && (
+            <Source id="social-alerts" type="geojson" data={communityGeoJson}>
               <Layer {...socialAlertsPointLayer} />
             </Source>
+          )}
+
+          {layerVisibility.resources && resourceGeoJson.features.length > 0 && (
+            <Source id="aid-resources" type="geojson" data={resourceGeoJson}>
+              <Layer {...aidResourcesPointLayer} />
+            </Source>
+          )}
+
+          {!location.loading && (
+            <Marker
+              longitude={location.lng}
+              latitude={location.lat}
+              anchor="bottom"
+            >
+              <div
+                role="img"
+                aria-label={`Selected weather location: ${location.city}`}
+                className="flex size-10 items-center justify-center rounded-full border-2 border-background bg-primary text-primary-foreground shadow-lg"
+              >
+                <MapPin className="size-5" aria-hidden="true" />
+              </div>
+            </Marker>
           )}
         </Map>
 
@@ -311,15 +384,86 @@ export default function CrisisMap() {
           onClose={() => setSelectedHazard(null)}
           onLocate={flyToHazard}
         />
-      </div>
+      </section>
 
-      {/* Alert Feed & Data Inspector Table */}
-      <AlertFeedTable
-        hazards={hazards}
-        selectedHazardId={selectedHazard?.id}
-        onSelectHazard={(h) => setSelectedHazard(h)}
-        onLocate={flyToHazard}
-      />
+      <main className="mx-auto w-full max-w-screen-2xl space-y-8 px-4 py-6 sm:px-6 sm:py-8">
+        <section aria-labelledby="current-conditions-heading" className="space-y-4">
+          <div>
+            <h2 id="current-conditions-heading" className="text-xl font-semibold tracking-tight">
+              Current conditions
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Weather near your selected location.
+            </p>
+          </div>
+          <div className="max-w-md">
+            {location.loading ? (
+              <div
+                role="status"
+                className="flex min-h-28 items-center justify-center gap-2 rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-xs"
+              >
+                <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+                Updating your selected location…
+              </div>
+            ) : (
+              <WeatherSummaryCard
+                key={`${location.source}:${location.lat}:${location.lng}`}
+                lat={location.lat}
+                lng={location.lng}
+                locationLabel={location.city}
+                compact
+              />
+            )}
+          </div>
+        </section>
+
+        <ImportantInformation
+          hazards={hazards}
+          resourceReports={nearbyResourceReports}
+          loading={loading}
+        />
+
+        <details className="group overflow-hidden rounded-xl border border-border bg-card">
+          <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 font-semibold outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 sm:px-6 [&::-webkit-details-marker]:hidden">
+            <span>
+              Technical Details
+              <span className="mt-0.5 block text-sm font-normal text-muted-foreground">
+                Detailed source records and map data for developers
+              </span>
+            </span>
+            <span className="text-sm font-normal text-muted-foreground group-open:hidden">Show</span>
+            <span className="hidden text-sm font-normal text-muted-foreground group-open:inline">Hide</span>
+          </summary>
+
+          <AlertFeedTable
+            hazards={hazards}
+            selectedHazardId={selectedHazard?.id}
+            onSelectHazard={(h) => setSelectedHazard(h)}
+            onLocate={flyToHazard}
+          />
+        </details>
+      </main>
     </div>
   );
+}
+
+function socialReportsToGeoJson(reports: SocialAlert[]) {
+  return {
+    type: "FeatureCollection" as const,
+    features: reports.map((post) => ({
+      type: "Feature" as const,
+      id: post.id,
+      geometry: {
+        type: "Point" as const,
+        coordinates: post.coordinates,
+      },
+      properties: {
+        id: post.id,
+        summary: post.summary,
+        category: post.category,
+        urgency: post.urgency,
+        author: post.authorHandle,
+      },
+    })),
+  };
 }

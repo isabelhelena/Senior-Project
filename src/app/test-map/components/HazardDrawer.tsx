@@ -7,11 +7,11 @@ import {
   ShieldAlert,
   MapPin,
   MessageSquare,
-  AlertTriangle,
   Info,
   ExternalLink,
 } from "lucide-react";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
+import { isAidResourceCategory } from "@/lib/community-resources";
 import type { UnifiedHazard, SocialAlert, UrgencyLevel } from "@/types/hazard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,10 +63,8 @@ export function HazardDrawer({
 
   return (
     <aside
-      className="absolute top-4 right-4 z-20 w-96 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] 
-                 flex flex-col bg-card/95 text-card-foreground backdrop-blur-md border border-border 
-                 rounded-xl shadow-2xl overflow-hidden transition-all duration-300 animate-in slide-in-from-right"
-      aria-label="Hazard Details Drawer"
+      className="absolute inset-x-3 bottom-3 z-20 flex max-h-[75%] flex-col overflow-hidden rounded-xl border border-border bg-card/95 text-card-foreground shadow-2xl backdrop-blur-md transition-all duration-300 animate-in slide-in-from-bottom sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-4 sm:max-h-[calc(100%-2rem)] sm:w-96 sm:slide-in-from-right"
+      aria-label="Alert details"
     >
       {/* Header */}
       <div className="p-4 border-b border-border flex items-start justify-between bg-muted/40">
@@ -75,8 +73,8 @@ export function HazardDrawer({
             <Badge className={urgencyStyle}>
               {hazard.urgency.toUpperCase()}
             </Badge>
-            <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider">
-              {hazard.source}
+            <Badge variant="outline" className="text-xs">
+              {sourceLabel(hazard.source, hazard.category)}
             </Badge>
             <Badge variant="secondary" className="text-[10px] uppercase">
               {hazard.category.replace("_", " ")}
@@ -89,10 +87,10 @@ export function HazardDrawer({
 
         <Button
           variant="ghost"
-          size="icon-xs"
+          size="icon"
           onClick={onClose}
-          className="text-muted-foreground hover:text-foreground cursor-pointer -mt-1 -mr-1"
-          aria-label="Close drawer"
+          className="-mr-2 -mt-2 size-11 text-muted-foreground hover:text-foreground"
+          aria-label="Close alert details"
         >
           <X className="w-4 h-4" />
         </Button>
@@ -106,10 +104,10 @@ export function HazardDrawer({
       >
         <div className="px-4 pt-3 border-b border-border bg-card">
           <TabsList className="w-full grid grid-cols-2">
-            <TabsTrigger value="details" className="text-xs">
-              Official Alert
+            <TabsTrigger value="details" className="min-h-11 text-sm">
+              Alert details
             </TabsTrigger>
-            <TabsTrigger value="social" className="text-xs flex items-center gap-1.5">
+            <TabsTrigger value="social" className="min-h-11 text-sm flex items-center gap-1.5">
               <MessageSquare className="w-3.5 h-3.5" />
               Community ({nearbySocialPosts.length})
             </TabsTrigger>
@@ -126,8 +124,8 @@ export function HazardDrawer({
             <div className="flex items-start gap-2.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs">
               <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
               <div>
-                <span className="font-semibold block mb-0.5">County-Wide Bulletin</span>
-                This watch/advisory covers regional zones without a localized radar polygon.
+                <span className="font-semibold block mb-0.5">Area-wide alert</span>
+                This alert applies to a wider area, so it does not have a precise shape on the map.
               </div>
             </div>
           )}
@@ -198,9 +196,9 @@ export function HazardDrawer({
                 variant="outline"
                 size="sm"
                 onClick={() => onLocate(hazard)}
-                className="w-full flex items-center justify-center gap-1.5 text-xs cursor-pointer"
+                className="min-h-11 w-full flex items-center justify-center gap-1.5 text-sm cursor-pointer"
               >
-                <MapPin className="w-3.5 h-3.5" /> Focus on Map
+                <MapPin className="w-4 h-4" /> Show on map
               </Button>
             </div>
           )}
@@ -214,7 +212,7 @@ export function HazardDrawer({
           {nearbySocialPosts.length > 0 ? (
             <div className="space-y-2.5">
               <div className="text-xs text-muted-foreground flex items-center justify-between pb-1">
-                <span>{nearbySocialPosts.length} report(s) inside this warning polygon</span>
+                <span>{nearbySocialPosts.length} community report(s) in this alert area</span>
               </div>
               {nearbySocialPosts.map((post) => (
                 <div
@@ -225,9 +223,16 @@ export function HazardDrawer({
                     <span className="font-semibold text-primary">
                       {post.authorHandle || "Citizen Report"}
                     </span>
-                    <Badge variant="outline" className="text-[10px]">
-                      {post.urgency.toUpperCase()}
-                    </Badge>
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {isAidResourceCategory(post.category) && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          Community-reported aid
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className="text-[10px]">
+                        {post.urgency.toUpperCase()}
+                      </Badge>
+                    </div>
                   </div>
                   <p className="text-xs leading-relaxed">{post.summary}</p>
                   <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
@@ -249,9 +254,9 @@ export function HazardDrawer({
           ) : (
             <div className="py-8 text-center space-y-2 text-muted-foreground">
               <MessageSquare className="w-8 h-8 mx-auto stroke-1 opacity-60" />
-              <p className="text-xs font-medium text-foreground">No Community Reports Inside Polygon</p>
+              <p className="text-sm font-medium text-foreground">No community reports in this alert area</p>
               <p className="text-[11px] leading-relaxed max-w-[240px] mx-auto">
-                No geotagged Bluesky posts were detected inside this polygon yet. The AI worker is actively monitoring the firehose.
+                No location-based community reports are available here right now.
               </p>
             </div>
           )}
@@ -261,3 +266,20 @@ export function HazardDrawer({
   );
 }
 
+function sourceLabel(
+  source: UnifiedHazard["source"],
+  category: UnifiedHazard["category"],
+) {
+  if (source === "bluesky" && isAidResourceCategory(category)) {
+    return "Community-reported aid location";
+  }
+
+  const labels: Record<UnifiedHazard["source"], string> = {
+    nws: "Weather service",
+    txdot: "Road agency",
+    osm: "Map data",
+    bluesky: "Community report",
+  };
+
+  return labels[source];
+}

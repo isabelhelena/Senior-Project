@@ -89,3 +89,17 @@ export const socialAlertsPointLayer: LayerProps = {
   },
 };
 
+/**
+ * Community-reported shelter and aid points
+ */
+export const aidResourcesPointLayer: LayerProps = {
+  id: "aid-resource-points",
+  type: "circle",
+  filter: ["==", "$type", "Point"],
+  paint: {
+    "circle-radius": 8,
+    "circle-color": "#16a34a",
+    "circle-stroke-width": 2.5,
+    "circle-stroke-color": "#ffffff",
+  },
+};

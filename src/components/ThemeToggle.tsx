@@ -10,7 +10,9 @@ export function ThemeToggle() {
   const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => {
+      setMounted(true);
+    });
   }, []);
 
   if (!mounted) {
@@ -18,8 +20,8 @@ export function ThemeToggle() {
       <Button
         type="button"
         variant="outline"
-        size="icon-sm"
-        className="w-8 h-8 rounded-full opacity-50 pointer-events-none"
+        size="icon"
+        className="size-11 rounded-full opacity-50 pointer-events-none"
         aria-label="Toggle theme"
       >
         <Sun className="h-4 w-4" />
@@ -39,9 +41,9 @@ export function ThemeToggle() {
     <Button
       type="button"
       variant="outline"
-      size="icon-sm"
+      size="icon"
       onClick={toggleTheme}
-      className="w-8 h-8 rounded-full border-border bg-background/80 backdrop-blur-sm hover:bg-muted transition-colors cursor-pointer shadow-sm"
+      className="size-11 rounded-full border-border bg-background/95 backdrop-blur-sm hover:bg-muted transition-colors cursor-pointer shadow-sm"
       title={isDark ? "Switch to light mode" : "Switch to dark mode"}
       aria-label="Toggle theme"
     >
