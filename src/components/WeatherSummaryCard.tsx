@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { useCurrentWeather } from '@/hooks/use-current-weather';
 import {
   CloudSun,
   CloudRain,
@@ -15,64 +15,15 @@ import {
   MapPin
 } from 'lucide-react';
 
-interface WeatherData {
-  station: string;
-  stationName: string;
-  condition: string;
-  tempF: number | null;
-  windMph: number | null;
-  windDirection: number | null;
-  humidity: number | null;
-  timestamp: string;
-}
-
 interface WeatherSummaryCardProps {
   lat?: number;
   lng?: number;
+  locationLabel?: string;
+  compact?: boolean;
 }
 
-export function WeatherSummaryCard({ lat, lng }: WeatherSummaryCardProps) {
-  const [data, setData] = useState<WeatherData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadWeather() {
-      if (lat === undefined || lng === undefined) return;
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const res = await fetch(`/api/weather-current?lat=${lat}&lng=${lng}`);
-        const result = (await res.json()) as WeatherData & { error?: string };
-
-        if (!res.ok) {
-          throw new Error(result.error || 'Failed to load weather');
-        }
-
-        if (isMounted) {
-          setData(result);
-        }
-      } catch (err: unknown) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Error fetching weather');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadWeather();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [lat, lng]);
+export function WeatherSummaryCard({ lat, lng, locationLabel, compact = false }: WeatherSummaryCardProps) {
+  const { data, loading, error } = useCurrentWeather(lat, lng);
 
   const getWeatherIcon = (condition: string) => {
     const lower = condition.toLowerCase();
@@ -87,7 +38,7 @@ export function WeatherSummaryCard({ lat, lng }: WeatherSummaryCardProps) {
       <Card className="w-full shadow-md">
         <CardContent className="flex items-center justify-center p-6 space-x-2">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Fetching local weather telemetry...</span>
+          <span className="text-sm text-muted-foreground">Checking current weather…</span>
         </CardContent>
       </Card>
     );
@@ -97,7 +48,7 @@ export function WeatherSummaryCard({ lat, lng }: WeatherSummaryCardProps) {
     return (
       <Card className="w-full border-destructive/30">
         <CardContent className="p-4 text-xs text-destructive">
-          Weather telemetry temporarily unavailable.
+          Current weather is temporarily unavailable. Please try again soon.
         </CardContent>
       </Card>
     );
@@ -107,10 +58,10 @@ export function WeatherSummaryCard({ lat, lng }: WeatherSummaryCardProps) {
     <Card className="w-full shadow-md border-border/60 bg-card/95 backdrop-blur">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <div>
-          <CardTitle className="text-sm font-semibold tracking-tight">Immediate Conditions</CardTitle>
+          <CardTitle className="text-sm font-semibold tracking-tight">Current weather</CardTitle>
           <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
             <MapPin className="h-3 w-3 shrink-0" />
-            <span className="truncate max-w-[130px]">{data.stationName}</span>
+            <span className="truncate max-w-[220px]">{locationLabel || data.stationName}</span>
           </div>
         </div>
         <Badge variant="outline" className="text-xs font-normal">
@@ -127,7 +78,7 @@ export function WeatherSummaryCard({ lat, lng }: WeatherSummaryCardProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 border-t pt-3 mt-3 text-xs text-muted-foreground">
+        {!compact && <div className="grid grid-cols-3 gap-2 border-t pt-3 mt-3 text-xs text-muted-foreground">
           <div className="flex flex-col items-center">
             <div className="flex items-center gap-1">
               <Wind className="h-3.5 w-3.5" />
@@ -157,7 +108,7 @@ export function WeatherSummaryCard({ lat, lng }: WeatherSummaryCardProps) {
               {data.windDirection !== null ? `${data.windDirection}°` : '--'}
             </span>
           </div>
-        </div>
+        </div>}
       </CardContent>
     </Card>
   );
