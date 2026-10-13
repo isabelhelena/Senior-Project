@@ -45,3 +45,8 @@ next-env.d.ts
 **/__pycache__/
 workers/bluesky/data/
 !workers/bluesky/.env.example
+
+# Supabase
+**/supabase/.temp
+**/supabase/.branches
+.supabase/
