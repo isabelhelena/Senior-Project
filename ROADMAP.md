@@ -67,7 +67,13 @@ Transition the frontend from a raw diagnostic tool into a slick, responsive geos
 
 ---
 
-## Milestone 2: Official data ingestion & backend consolidation (Upcoming)
+## Milestone 2: Official data ingestion & backend consolidation (In Progress)
+
+NWS and TxDOT ingestion is implemented in `workers/official/`: opt-in ten-minute local
+scheduling, NWS affected-zone polygon resolution, atomic Supabase snapshots,
+deduplication, expiry/removal cleanup, and storage-backed map routes. See the
+[operational guide](workers/official/README.md). OSM ingestion and a unified
+bounding-box endpoint remain future work.
 
 ### Goal
 

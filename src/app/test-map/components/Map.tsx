@@ -69,12 +69,18 @@ const TEXAS_VIEWPORT = {
 
 const SELECTED_LOCATION_ZOOM = 10;
 
-type NwsFeature = Parameters<typeof normalizeNwsAlert>[0];
-type TxDotFeature = Parameters<typeof normalizeTxDotRoad>[0];
+async function fetchHazards<T>(path: string, normalize: (feature: T) => UnifiedHazard) {
+  const response = await fetch(path, { signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error("Stored feed unavailable");
+  const data = await response.json() as { features: T[]; stale: boolean };
+  if (!Array.isArray(data.features)) throw new Error("Invalid stored feed");
+  return { hazards: data.features.map(normalize), stale: data.stale };
+}
 
 export default function CrisisMap() {
   const mapRef = useRef<MapRef>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const fetching = useRef(false);
   const { resolvedTheme } = useTheme();
   const { location, setFromMap } = useLocation();
   const weather = useCurrentWeather(
@@ -104,38 +110,35 @@ export default function CrisisMap() {
   const mapStyle = resolvedTheme === "light" ? CARTO_LIGHT : CARTO_DARK;
 
   const fetchTelemetry = useCallback(async () => {
+    if (fetching.current) return;
+    fetching.current = true;
     setError(null);
     try {
       const [nwsRes, txdotRes] = await Promise.allSettled([
-        fetch("/api/alerts"),
-        fetch("/api/road-conditions"),
+        fetchHazards("/api/alerts", normalizeNwsAlert),
+        fetchHazards("/api/road-conditions", normalizeTxDotRoad),
       ]);
 
       const loadedHazards: UnifiedHazard[] = [];
+      const warnings: string[] = [];
 
-      if (nwsRes.status === "fulfilled" && nwsRes.value.ok) {
-        const nwsData = (await nwsRes.value.json()) as { features?: NwsFeature[] };
-        if (Array.isArray(nwsData.features)) {
-          nwsData.features.forEach((feat) => {
-            loadedHazards.push(normalizeNwsAlert(feat));
-          });
+      for (const [label, result] of [["Weather alerts", nwsRes], ["Road conditions", txdotRes]] as const) {
+        if (result.status === "rejected") {
+          warnings.push(`${label} are unavailable.`);
+          continue;
         }
-      }
-
-      if (txdotRes.status === "fulfilled" && txdotRes.value.ok) {
-        const txdotData = (await txdotRes.value.json()) as { features?: TxDotFeature[] };
-        if (Array.isArray(txdotData.features)) {
-          txdotData.features.forEach((feat, idx) => {
-            loadedHazards.push(normalizeTxDotRoad(feat, idx));
-          });
-        }
+        loadedHazards.push(...result.value.hazards);
+        if (result.value.stale) warnings.push(`${label} have not refreshed in over 30 minutes.`);
       }
 
       setHazards(loadedHazards);
+      setSelectedHazard((current) => current ? loadedHazards.find((hazard) => hazard.id === current.id) ?? null : null);
+      setError(warnings.length ? warnings.join(" ") : null);
     } catch (err) {
       console.error("Telemetry fetch error:", err);
       setError("We could not load the latest map information. Please try again.");
     } finally {
+      fetching.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -145,6 +148,10 @@ export default function CrisisMap() {
     queueMicrotask(() => {
       void fetchTelemetry();
     });
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void fetchTelemetry();
+    }, 60_000);
+    return () => window.clearInterval(timer);
   }, [fetchTelemetry]);
 
   const moveToSelectedLocation = useCallback(() => {
@@ -213,17 +220,7 @@ export default function CrisisMap() {
         const isSocial = MOCK_SOCIAL_ALERTS.find((s) => s.id === clickedId);
         if (isSocial) {
           setActiveSection(null);
-          setSelectedHazard({
-            id: isSocial.id,
-            source: "bluesky",
-            externalId: isSocial.blueskyUri,
-            headline: isSocial.summary,
-            category: isSocial.category,
-            urgency: isSocial.urgency,
-            hasGeometry: true,
-            geometry: { type: "Point", coordinates: isSocial.coordinates },
-            createdAt: isSocial.createdAt,
-          });
+          setSelectedHazard(socialReportToHazard(isSocial));
         }
       }
     } else {
@@ -495,5 +492,6 @@ function socialReportToHazard(report: SocialAlert): UnifiedHazard {
     hasGeometry: true,
     geometry: { type: "Point", coordinates: report.coordinates },
     createdAt: report.createdAt,
+    sourceClassification: report.sourceClassification,
   };
 }

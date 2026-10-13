@@ -1,4 +1,3 @@
-import Image from "next/image";
 import FeedDiagnosticsPage from "./test-feed/page";
 
 export default function Home() {

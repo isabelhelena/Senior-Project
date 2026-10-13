@@ -45,3 +45,7 @@ next-env.d.ts
 **/__pycache__/
 workers/bluesky/data/
 !workers/bluesky/.env.example
+workers/official/data/
+!workers/official/.env.example
+!.env.example
+.npm-cache/

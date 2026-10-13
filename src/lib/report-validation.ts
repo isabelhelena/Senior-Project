@@ -1,3 +1,6 @@
+import { normalizeClassification } from "./alert-classification"
+import type { DisasterCategory, SourceClassification, StoredUrgencyLevel } from "@/types/hazard"
+
 export const INCIDENT_CATEGORIES = [
   { value: "flood", label: "Flood" },
   { value: "shelter", label: "Shelter" },
@@ -31,8 +34,9 @@ export interface IncidentReportDraft {
 }
 
 export interface IncidentReportPayload {
-  category: IncidentCategory
-  severity: IncidentSeverity
+  category: DisasterCategory
+  urgency: StoredUrgencyLevel
+  sourceClassification: SourceClassification
   description: string
   latitude: number
   longitude: number
@@ -61,12 +65,13 @@ export function validateIncidentReport(
   const description = draft.description.trim()
   const latitude = parseCoordinate(draft.latitude)
   const longitude = parseCoordinate(draft.longitude)
+  const classification = normalizeClassification(draft.category, draft.severity)
 
   if (!categoryValues.has(draft.category)) {
     errors.category = "Select an incident category."
   }
 
-  if (!severityValues.has(draft.severity)) {
+  if (!severityValues.has(draft.severity) || classification.urgency === "unknown") {
     errors.severity = "Select a severity level."
   }
 
@@ -86,18 +91,18 @@ export function validateIncidentReport(
     errors.longitude = "Enter a longitude from -180 to 180."
   }
 
-  if (Object.keys(errors).length > 0) {
+  if (Object.keys(errors).length > 0 || latitude === null || longitude === null || classification.urgency === "unknown") {
     return { success: false, errors }
   }
 
   return {
     success: true,
     data: {
-      category: draft.category as IncidentCategory,
-      severity: draft.severity as IncidentSeverity,
+      ...classification,
+      urgency: classification.urgency,
       description,
-      latitude: latitude as number,
-      longitude: longitude as number,
+      latitude,
+      longitude,
     },
   }
 }

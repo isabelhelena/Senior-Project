@@ -1,5 +1,6 @@
-import type { Feature, Geometry } from "geojson";
-import type { DisasterCategory, UnifiedHazard, UrgencyLevel } from "@/types/hazard";
+import type { Geometry } from "geojson";
+import type { DisasterCategory, SocialAlert, UnifiedHazard, UrgencyLevel } from "@/types/hazard";
+import { normalizeClassification, normalizeUrgency } from "./alert-classification";
 
 /**
  * Raw NWS GeoJSON Feature shape based on api.weather.gov/alerts
@@ -68,24 +69,6 @@ function inferNwsCategory(event = "", headline = ""): DisasterCategory {
 }
 
 /**
- * Maps NWS severity to `urgency_level` enum in schema.sql
- */
-function mapNwsUrgency(severity = ""): UrgencyLevel {
-  switch (severity.toLowerCase()) {
-    case "extreme":
-      return "critical";
-    case "severe":
-      return "severe";
-    case "moderate":
-      return "medium";
-    case "minor":
-      return "low";
-    default:
-      return "unknown";
-  }
-}
-
-/**
  * Maps TxDOT roadway status to `urgency_level`
  */
 function mapTxDotUrgency(status = ""): UrgencyLevel {
@@ -122,7 +105,7 @@ export function normalizeNwsAlert(feature: RawNwsFeature): UnifiedHazard {
     description: p.description || undefined,
     instruction: p.instruction || undefined,
     category: inferNwsCategory(event, headline),
-    urgency: mapNwsUrgency(p.severity),
+    urgency: normalizeUrgency(p.severity),
     eventType: event,
     areaDesc: p.areaDesc || undefined,
     hasGeometry: Boolean(feature.geometry),
@@ -136,11 +119,11 @@ export function normalizeNwsAlert(feature: RawNwsFeature): UnifiedHazard {
 /**
  * Normalizes a TxDOT ArcGIS Feature into `UnifiedHazard`.
  */
-export function normalizeTxDotRoad(feature: RawTxDotFeature, index = 0): UnifiedHazard {
+export function normalizeTxDotRoad(feature: RawTxDotFeature): UnifiedHazard {
   const p = feature.properties || {};
   const route = p.RTE_NM || "Texas Roadway";
   const status = p.RDWAY_STAT || "Hazard / Condition";
-  const id = `txdot-${route}-${index}`;
+  const id = String(feature.id || p.id || `txdot:${p.OBJECTID}`);
 
   return {
     id,
@@ -153,9 +136,19 @@ export function normalizeTxDotRoad(feature: RawTxDotFeature, index = 0): Unified
     eventType: `Road Condition: ${status}`,
     hasGeometry: Boolean(feature.geometry),
     geometry: feature.geometry,
-    createdAt: new Date().toISOString(),
+    createdAt: typeof p.fetched_at === "string" ? p.fetched_at : undefined,
     rawProperties: p,
   };
+}
+
+/** Classified source data after its field names and coordinates are decoded. */
+export type SocialAlertInput = Omit<SocialAlert, "category" | "urgency" | "sourceClassification"> & {
+  category: unknown;
+  urgency: unknown;
+};
+
+export function normalizeSocialAlert(alert: SocialAlertInput): SocialAlert {
+  return { ...alert, ...normalizeClassification(alert.category, alert.urgency) };
 }
 
 /**

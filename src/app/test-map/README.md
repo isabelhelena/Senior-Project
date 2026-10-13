@@ -21,7 +21,7 @@ flowchart TD
         OSM["OpenStreetMap Extracts"]
     end
 
-    subgraph Workers["Python Background Workers (Target Architecture)"]
+    subgraph Workers["Python Background Workers (OSM Planned)"]
         W_NWS["NWS Ingestion Worker"]
         W_TxDOT["TxDOT Road Worker"]
         W_BSKY["Bluesky Worker (Gemini + Photon)"]
@@ -42,9 +42,8 @@ flowchart TD
         Controls["MapControls & Layer Docks"]
     end
 
-    %% Current MVP proxy routes
-    NWS -.->|"Current MVP Proxy (/api/alerts)"| Normalizer
-    TxDOT -.->|"Current MVP Proxy (/api/road-conditions)"| Normalizer
+    %% Current storage-backed routes
+    T_Alerts -->|"/api/alerts and /api/road-conditions"| Normalizer
 
     %% Target Unified Worker Pipeline
     NWS --> W_NWS
@@ -57,7 +56,7 @@ flowchart TD
     W_BSKY --> T_Social
     W_OSM --> T_Resources
 
-    DB -->|"Unified PostGIS Query (/api/hazards)"| Normalizer
+    DB -.->|"Planned unified query (/api/hazards)"| Normalizer
 
     Normalizer --> MapEngine
     Normalizer --> Table
@@ -66,7 +65,7 @@ flowchart TD
     Controls --> MapEngine
 ```
 
-Whether records are pulled directly through Next.js proxy endpoints today or directly queried from Supabase PostGIS (`public_alerts`, `social_alerts`, `emergency_resources`) in the future, the frontend consumes the exact same data contract without requiring component rewrites.
+Official records now come from Supabase `public_alerts` through the existing Next.js routes. Their GeoJSON contract remains compatible with the frontend normalizers. Live social and resource integration is still planned.
 
 ---
 
@@ -77,9 +76,9 @@ Whether records are pulled directly through Next.js proxy endpoints today or dir
 | **Vector Basemap**              | Complete                | Clean CARTO Positron (Light) & Dark Matter vector styles dynamically synced with system/app theme. Zero API keys.                            |
 | **Tilt Locking**                | Complete                | Camera pitch is locked to 0° (`maxPitch: 0`, `pitchWithRotate: false`) for an orthographic, top-down 2D view.                                |
 | **North / Texas Reset**         | Complete                | Floating compass button smoothly resets viewport center, zoom, bearing (`0°`), and pitch (`0°`).                                             |
-| **NWS Weather Warnings**        | Complete                | Live GeoJSON from `/api/alerts`. Polygons rendered via WebGL with data-driven severity styling (Critical, Severe, Medium).                   |
-| **TxDOT Road Closures**         | Complete                | Live GeoJSON from `/api/road-conditions`. Rendered as high-visibility dashed linestrings.                                                    |
-| **Null-Geometry Preservation**  | Complete                | County-wide watches and regional bulletins without radar polygons (`geometry: null`) are preserved in state and displayed in the feed table. |
+| **NWS Weather Warnings**        | Complete                | Stored GeoJSON from `/api/alerts`. Polygons rendered via WebGL with data-driven severity styling (Critical, Severe, Medium).                   |
+| **TxDOT Road Closures**         | Complete                | Stored GeoJSON from `/api/road-conditions`. Rendered as high-visibility dashed linestrings.                                                    |
+| **Null-Geometry Preservation**  | Complete                | The worker resolves missing NWS geometry from affected-zone boundaries; the frontend also retains its null-geometry fallback. |
 | **Slide-Out Inspection Drawer** | Complete                | Glassmorphic panel displaying official instructions, expiration countdown timers, affected areas, and descriptions.                          |
 | **Community Chatter (Spatial)** | Complete (Prototyping)  | Tab in the drawer uses `@turf/boolean-point-in-polygon` to spatially filter social reports inside the clicked hazard polygon.                |
 | **Telemetry Feed Inspector**    | Complete                | Full-width filterable table below the map with search, count badges, and **Click-to-Fly** navigation.                                        |
@@ -123,8 +122,7 @@ NWS issues two classes of weather bulletins:
 1. Convective, radar-tracked storm warnings (Tornadoes, Severe Thunderstorms, Flash Floods) which carry `Polygon` or `MultiPolygon` geometries.
 2. Regional / county-wide watches and advisories (Flood Watches, Freeze Warnings, Heat Advisories) which often send `"geometry": null` in the raw GeoJSON, referencing county FIPS/UGC codes instead.
 
-**Our Safeguard:**  
-Passing `null` geometries to MapLibre WebGL `<Source>` can trigger silent dropouts or console warnings. `hazardsToGeoJson()` filters strictly for plottable geometries, while `Map.tsx` retains **all** records in state. County-wide bulletins are displayed in [AlertFeedTable.tsx](components/AlertFeedTable.tsx) with a distinct **"County Zone"** badge, and clicking them opens the [HazardDrawer.tsx](components/HazardDrawer.tsx) with full advisory instructions.
+**Current behavior:** The NWS worker resolves `affectedZones` into polygons before persistence, preserving the source in `properties.geometrySource`. Zone boundaries describe the affected area and are not radar-derived storm footprints. `hazardsToGeoJson()` still filters null geometries defensively, and the inspector can display text-only records.
 
 ### B. Point-in-Polygon Community Chatter
 
@@ -181,9 +179,16 @@ Users can pan and zoom freely. If rotated, the **Compass button** in [MapControl
 
 ---
 
-## 6. Next Steps: Unified Supabase Ingestion Architecture (Phase 4)
+## 6. Supabase ingestion status and remaining work
 
-While the current MVP proxies NWS and TxDOT feeds directly through Next.js route handlers (`/api/alerts` and `/api/road-conditions`), the long-term target architecture consolidates **all data ingestion into Supabase PostGIS via standalone Python workers**:
+NWS and TxDOT ingestion runs in local Python workers with opt-in ten-minute polling.
+`/api/alerts` and `/api/road-conditions` read persisted Supabase snapshots;
+the visible map rereads them every minute and warns on failed/stale feeds. Missing NWS
+polygons are resolved from affected-zone boundaries before storage. See
+[worker setup](../../../workers/official/README.md). Social integration,
+OSM imports, and unified bounding-box queries remain separate work.
+
+The architecture consolidates **data ingestion into Supabase PostGIS via standalone Python workers**. NWS and TxDOT now follow this path; the diagram also includes planned OSM and unified-query work:
 
 ```mermaid
 flowchart LR
