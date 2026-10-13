@@ -3,20 +3,24 @@ import type { Geometry } from "geojson";
 /**
  * Maps directly to PostgreSQL `disaster_category` enum in schema.sql
  */
-export type DisasterCategory =
-  | "flood"
-  | "freeze"
-  | "tornado"
-  | "road_hazard"
-  | "shelter"
-  | "water_station"
-  | "power_outage"
-  | "other";
+export const DISASTER_CATEGORIES = [
+  "flood", "freeze", "tornado", "road_hazard", "shelter",
+  "water_station", "power_outage", "other",
+] as const;
+export type DisasterCategory = (typeof DISASTER_CATEGORIES)[number];
 
 /**
- * Maps directly to PostgreSQL `urgency_level` enum in schema.sql
+ * Stored levels match PostgreSQL; `unknown` is a display-only fallback.
  */
-export type UrgencyLevel = "low" | "medium" | "severe" | "critical" | "unknown";
+export const STORED_URGENCY_LEVELS = ["low", "medium", "severe", "critical"] as const;
+export type StoredUrgencyLevel = (typeof STORED_URGENCY_LEVELS)[number];
+export type UrgencyLevel = StoredUrgencyLevel | "unknown";
+
+/** Preserve source detail when its vocabulary is broader than our categories. */
+export interface SourceClassification {
+  category: string | null;
+  urgency: string | null;
+}
 
 /**
  * High-level filter categories for the Shelters & Aid tab
@@ -85,6 +89,7 @@ export interface UnifiedHazard {
   expiresAt?: string;
   createdAt?: string;
   rawProperties?: Record<string, unknown>;
+  sourceClassification?: SourceClassification;
   resourceGroup?: ResourceGroupKey;
   resourceSubtype?: string;
   verified?: boolean;
@@ -96,7 +101,7 @@ export interface UnifiedHazard {
 }
 
 /**
- * Social alert from Bluesky firehose matching `social_alerts` table in schema.sql
+ * Normalized social alert for display, not a raw `social_alerts` database row.
  */
 export interface SocialAlert {
   id: string;
@@ -107,5 +112,6 @@ export interface SocialAlert {
   coordinates: [number, number]; // [longitude, latitude]
   createdAt: string;
   authorHandle?: string;
+  sourceClassification?: SourceClassification;
 }
 

@@ -1,13 +1,72 @@
 # Lone Star Support
 
-A Texas disaster-information project with a Next.js diagnostics app, a Python
-Bluesky worker, and an offline classroom demo.
+A Texas disaster-information project with a Next.js map and diagnostics app,
+Python workers for NWS, TxDOT, and Bluesky, and an offline classroom demo.
 
 ## Current status
 
-- **Backend Ingestion**: Standalone Python workers under `workers/bluesky/` ingest, filter, geocode, and persist live Bluesky posts into Supabase PostGIS. The offline presentation demo is complete and repeatable.
-- **Geospatial Map Frontend**: The interactive MapLibre WebGL interface under `/test-map` is actively in progress (Phases 1–3 implemented). It renders live NWS weather alert polygons, TxDOT road closures, light/dark vector basemaps, and an inspection drawer with spatial point-in-polygon social filtering. See [test-map documentation](src/app/test-map/README.md).
-- **In Progress / Next Steps**: Hooking the live Supabase `social_alerts` table into the map (Phase 4), importing OpenStreetMap shelter POIs, and automated freshness expiry.
+- **Official alerts:** NWS and filtered TxDOT Roadway Status data are stored in Supabase, with opt-in 10-minute polling, polygon resolution, and expired/resolved record cleanup.
+- **Social ingestion:** The Bluesky worker filters, extracts, geocodes, and saves reports. Shared category/urgency mappings and an offline demo are implemented.
+- **Map:** `/test-map` displays stored official alerts, weather, layer controls, and an inspection drawer. Social and aid-resource markers still use fixtures.
+- **Tests:** Python worker/demo tests and TypeScript classification/validation tests exist; browser and API security coverage remains unfinished.
+
+## To do
+
+Updated against the [milestone progress report](<Milestone Progress Report - Lone Star Support.pdf>) and current code. The report's NWS/TxDOT ingestion task and missing-polygon resolution are now complete.
+
+### Connect the remaining data
+
+- [ ] **Live social map:** Read `social_alerts` through a server endpoint, apply the shared mappings, and replace mock markers. Add freshness filtering and expired-report cleanup.
+- [ ] **Emergency facilities:** Import hospitals, fire stations, and shelter locations from OSM Overpass into `emergency_resources`; query and display nearby facilities.
+- [ ] **Community submissions:** Connect `/report` to validated server-side persistence in `community_reports`, then display accepted reports. The current form only validates locally.
+- [ ] **Moderation:** Add content filtering, submission rate limits, and an authenticated review interface for community reports.
+
+### Finish milestone verification
+
+- [ ] **Integration and security tests:** Add the planned Playwright/Pytest coverage for browser flows, API validation, database access permissions, and ingestion failures. Keep existing unit tests.
+- [ ] **Mobile polish:** Verify map gestures, navigation, drawers, and report forms on small touch screens; fix layout and usability gaps in the existing responsive UI.
+
+## NWS and TxDOT ingestion
+
+Python workers now store official alerts in Supabase, and the map reads that
+stored data. NWS zone boundaries are resolved into polygons. TxDOT excludes
+open-to-traffic, artificial-centerline, and proposed roads. Worker runs remove
+expired/resolved alerts and avoid duplicates. Current weather observations are unchanged.
+
+**Setup** (Python 3.12+, from the project root):
+
+1. Apply [the migration](supabase/migrations/20261013000000_official_ingestion.sql)
+   in Supabase SQL Editor if not already applied. The existing project is set up.
+2. Install the worker dependencies:
+
+   ```powershell
+   python -m venv workers/official/.venv
+   workers/official/.venv/Scripts/python.exe -m pip install -r workers/official/requirements.txt
+   ```
+
+3. Use the example files to configure:
+   - `workers/official/.env`: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
+     `NWS_USER_AGENT` with a contact email or project URL.
+   - Root `.env.local`: `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
+     Keep the service-role key in the worker only. Restart Next.js after changes.
+
+**Polling controls** (PowerShell):
+
+```powershell
+.\workers\official\polling.ps1 on      # Refresh now, then every 10 minutes
+.\workers\official\polling.ps1 off     # Stop polling
+.\workers\official\polling.ps1 status  # Check polling state
+.\workers\official\polling.ps1 once    # Refresh once without enabling polling
+```
+
+Polling is opt-in; Windows must be awake, online, and signed in. While polling
+is off, stored data remains available, expired alerts are hidden, and stale
+snapshots are labeled. See [worker documentation](workers/official/README.md)
+for checks, logs, and troubleshooting.
+
+Category and urgency conversions are documented in
+[alert classification](documentation/Alert_Classification.md). Run `npm test`
+to verify the shared mappings and report validation.
 
 ## Run the demo
 
@@ -102,4 +161,4 @@ The Next.js frontend (App Router) provides diagnostic views and the primary geos
   - **Telemetry Table**: A comprehensive inspector below the map displaying all Texas advisories (including non-polygon county bulletins) with full text search and click-to-fly navigation.
   - Full details: [src/app/test-map/README.md](src/app/test-map/README.md).
 - **Diagnostics Feed (`/test-feed`)**:
-  Open **http://localhost:3000/test-feed** to test raw NWS and TxDOT feed responses against local coordinates.
+  Open **http://localhost:3000/test-feed** to inspect statewide NWS and TxDOT snapshots stored in Supabase. Current weather observations still use the selected coordinates.

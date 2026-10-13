@@ -10,10 +10,11 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Lone Star Support project guide
 
-This repository is a Texas disaster-information project with two active parts today:
+This repository is a Texas disaster-information project with three active parts today:
 
 - A Next.js frontend in `src/` for diagnostics, map-oriented UI work, and future alert display.
 - Standalone Python workers under `workers/bluesky/` for Bluesky ingestion, filtering, Gemini extraction, geocoding, and Supabase persistence.
+- Official feed ingestion under `workers/official/` for NWS zone polygons and filtered TxDOT roads. It runs once by default; `polling.ps1 on/off/status/once` controls opt-in ten-minute Windows polling.
 
 The project is still evolving toward the broader Lone Star Support architecture described in the milestone plan: public data ingestion for NWS, TxDOT, and OSM; a unified map with alerts; and a true geospatial disaster dashboard. The current codebase is the operational baseline, not the final end-state. We should match the current stack and implementation patterns while keeping the roadmap and product goals in view.
 
@@ -25,6 +26,7 @@ Use the actual project files in this repo when making decisions:
 
 - `README.md` for the overall repo status and usage.
 - `workers/bluesky/README.md` for the live worker flow and operational details.
+- `workers/official/README.md` for official ingestion, credentials, and polling controls. Next.js alert routes read Supabase; current weather observations still query NWS.
 - `package.json` and the app code under `src/` for frontend conventions.
 - The Python scripts in `workers/bluesky/` as the authoritative implementation of the current ingestion pipeline.
 - The milestone planning document only as a roadmap for future scope, not as a literal description of the code that exists today.

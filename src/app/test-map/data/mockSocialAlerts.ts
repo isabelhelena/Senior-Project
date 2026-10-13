@@ -1,15 +1,15 @@
-import type { SocialAlert } from "@/types/hazard";
+import { normalizeSocialAlert, type SocialAlertInput } from "@/lib/normalizers";
 
 /**
- * Realistic test social alerts from Bluesky firehose matching `social_alerts` schema
+ * Sample source alerts pass through the same adapter intended for live reads.
  */
-export const MOCK_SOCIAL_ALERTS: SocialAlert[] = [
+const sampleAlerts: SocialAlertInput[] = [
   {
     id: "social-1",
     blueskyUri: "at://did:plc:satxreporter/app.bsky.feed.post/3la712",
     summary: "Flooding has closed low-water crossings along Salado Creek in San Antonio. Stranded vehicles reported.",
     category: "flood",
-    urgency: "severe",
+    urgency: "moderate",
     coordinates: [-98.4936, 29.4241],
     createdAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15 mins ago
     authorHandle: "@satx_emergency.bsky.social",
@@ -29,7 +29,7 @@ export const MOCK_SOCIAL_ALERTS: SocialAlert[] = [
     blueskyUri: "at://did:plc:elpasocitizen/app.bsky.feed.post/3la718",
     summary: "Water pooling heavily on I-10 East near downtown El Paso. Traffic crawling.",
     category: "flood",
-    urgency: "medium",
+    urgency: "moderate",
     coordinates: [-106.4869, 31.7619],
     createdAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
     authorHandle: "@elpaso_chatter.bsky.social",
@@ -39,7 +39,7 @@ export const MOCK_SOCIAL_ALERTS: SocialAlert[] = [
     blueskyUri: "at://did:plc:rgvobserver/app.bsky.feed.post/3la720",
     summary: "TxDOT crews spotted closing ramps near Edinburg due to standing water.",
     category: "road_hazard",
-    urgency: "medium",
+    urgency: "moderate",
     coordinates: [-98.1633, 26.3017],
     createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     authorHandle: "@rgv_news.bsky.social",
@@ -55,4 +55,6 @@ export const MOCK_SOCIAL_ALERTS: SocialAlert[] = [
     authorHandle: "@atx_mutualaid.bsky.social",
   },
 ];
+
+export const MOCK_SOCIAL_ALERTS = sampleAlerts.map(normalizeSocialAlert);
 

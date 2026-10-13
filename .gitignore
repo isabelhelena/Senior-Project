@@ -50,3 +50,8 @@ workers/bluesky/data/
 **/supabase/.temp
 **/supabase/.branches
 .supabase/
+
+workers/official/data/
+!workers/official/.env.example
+!.env.example
+.npm-cache/
