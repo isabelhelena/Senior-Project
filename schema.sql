@@ -72,8 +72,18 @@ $$;
 ALTER FUNCTION "public"."get_incidents_in_bbox"("min_lon" double precision, "min_lat" double precision, "max_lon" double precision, "max_lat" double precision) OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision DEFAULT 25000, "filter_type" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "osm_id" "text", "name" "text", "resource_type" "text", "address" "text", "phone" "text", "dist_meters" double precision, "lon" double precision, "lat" double precision)
-    LANGUAGE "sql" STABLE
+CREATE OR REPLACE FUNCTION "public"."get_nearby_emergency_resources"(
+  "user_lon" double precision,
+  "user_lat" double precision,
+  "max_distance_meters" double precision DEFAULT 25000,
+  "filter_type" "text" DEFAULT NULL::"text",
+  "filter_types" "text"[] DEFAULT NULL::"text"[],
+  "search_query" "text" DEFAULT NULL::"text",
+  "include_unnamed" boolean DEFAULT false,
+  "result_limit" integer DEFAULT 300
+) RETURNS TABLE("id" "uuid", "osm_id" "text", "name" "text", "resource_type" "text", "address" "text", "phone" "text", "dist_meters" double precision, "lon" double precision, "lat" double precision)
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
     AS $$
   select
     er.id,
@@ -90,16 +100,25 @@ CREATE OR REPLACE FUNCTION "public"."get_nearby_emergency_resources"("user_lon" 
     select st_setsrid(st_point(user_lon, user_lat), 4326)::geography as point
   ) as search_point
   where (filter_type is null or er.resource_type = filter_type)
+    and (filter_types is null or er.resource_type = any(filter_types))
+    and (coalesce(include_unnamed, false) or er.name not like 'Unnamed %')
+    and (
+      nullif( btrim(search_query), '' ) is null
+      or er.name ilike '%' || btrim(search_query) || '%'
+      or coalesce(er.address, '') ilike '%' || btrim(search_query) || '%'
+      or replace(er.resource_type, '_', ' ') ilike '%' || btrim(search_query) || '%'
+    )
     and st_dwithin(
       er.geom::geography,
       search_point.point,
       max_distance_meters
     )
-  order by dist_meters asc;
+  order by dist_meters asc
+  limit greatest(1, least(coalesce(result_limit, 300), 1000));
 $$;
 
 
-ALTER FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text") OWNER TO "postgres";
+ALTER FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text", "filter_types" "text"[], "search_query" "text", "include_unnamed" boolean, "result_limit" integer) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."prune_official_alerts"() RETURNS integer
@@ -374,6 +393,10 @@ CREATE INDEX "emergency_resources_geog_gix" ON "public"."emergency_resources" US
 
 
 
+CREATE INDEX "emergency_resources_type_idx" ON "public"."emergency_resources" USING "btree" ("resource_type");
+
+
+
 CREATE INDEX "public_alerts_geom_idx" ON "public"."public_alerts" USING "gist" ("geom");
 
 
@@ -386,6 +409,8 @@ ALTER TABLE "public"."community_reports" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."emergency_resources" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read access on emergency_resources" ON "public"."emergency_resources" FOR SELECT USING (true);
 
 
 ALTER TABLE "public"."official_ingestion_status" ENABLE ROW LEVEL SECURITY;
@@ -410,9 +435,9 @@ GRANT ALL ON FUNCTION "public"."get_incidents_in_bbox"("min_lon" double precisio
 
 
 
-GRANT ALL ON FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text") TO "service_role";
+GRANT ALL ON FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text", "filter_types" "text"[], "search_query" "text", "include_unnamed" boolean, "result_limit" integer) TO "anon";
+GRANT ALL ON FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text", "filter_types" "text"[], "search_query" "text", "include_unnamed" boolean, "result_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_nearby_emergency_resources"("user_lon" double precision, "user_lat" double precision, "max_distance_meters" double precision, "filter_type" "text", "filter_types" "text"[], "search_query" "text", "include_unnamed" boolean, "result_limit" integer) TO "service_role";
 
 
 

@@ -83,6 +83,7 @@ Whether records are pulled directly through Next.js proxy endpoints today or dir
 | **Slide-Out Inspection Drawer** | Complete                | Glassmorphic panel displaying official instructions, expiration countdown timers, affected areas, and descriptions.                          |
 | **Community Chatter (Spatial)** | Complete (Prototyping)  | Tab in the drawer uses `@turf/boolean-point-in-polygon` to spatially filter social reports inside the clicked hazard polygon.                |
 | **Telemetry Feed Inspector**    | Complete                | Full-width filterable table below the map with search, count badges, and **Click-to-Fly** navigation.                                        |
+| **OSM Emergency Resources**     | Complete                | Live PostGIS query via `/api/emergency-resources` (`get_nearby_emergency_resources`), clustered WebGL icons, 5 category chips, and search.   |
 | **Live Supabase Social Feed**   | _In Progress (Phase 4)_ | Currently using realistic test fixtures in `data/mockSocialAlerts.ts` until `/api/social-alerts` is connected to Supabase.                   |
 
 ---

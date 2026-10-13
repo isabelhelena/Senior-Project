@@ -9,6 +9,7 @@ import {
   Info,
   Car,
   CloudRain,
+  TentTree,
 } from "lucide-react";
 import type { UnifiedHazard, UrgencyLevel } from "@/types/hazard";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +46,13 @@ export function AlertFeedTable({
       // Source filter
       if (filterSource === "nws" && h.source !== "nws") return false;
       if (filterSource === "txdot" && h.source !== "txdot") return false;
+      if (
+        filterSource === "resources" &&
+        h.source !== "osm" &&
+        !h.resourceGroup
+      ) {
+        return false;
+      }
       if (filterSource === "polygon" && !h.hasGeometry) return false;
       if (filterSource === "bulletin" && h.hasGeometry) return false;
 
@@ -66,9 +74,19 @@ export function AlertFeedTable({
   const counts = useMemo(() => {
     const nwsCount = hazards.filter((h) => h.source === "nws").length;
     const txdotCount = hazards.filter((h) => h.source === "txdot").length;
+    const resourcesCount = hazards.filter(
+      (h) => h.source === "osm" || Boolean(h.resourceGroup),
+    ).length;
     const polygonCount = hazards.filter((h) => h.hasGeometry).length;
     const bulletinCount = hazards.filter((h) => !h.hasGeometry).length;
-    return { all: hazards.length, nws: nwsCount, txdot: txdotCount, polygon: polygonCount, bulletin: bulletinCount };
+    return {
+      all: hazards.length,
+      nws: nwsCount,
+      txdot: txdotCount,
+      resources: resourcesCount,
+      polygon: polygonCount,
+      bulletin: bulletinCount,
+    };
   }, [hazards]);
 
   return (
@@ -81,7 +99,7 @@ export function AlertFeedTable({
             Texas Telemetry Feed & Data Inspector
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Real-time feed across Texas: {counts.all} total records ({counts.polygon} with map geometry, {counts.bulletin} county advisories)
+            Real-time feed across Texas: {counts.all} total records ({counts.polygon} with map geometry, {counts.bulletin} county advisories, {counts.resources} local aid resources)
           </p>
         </div>
 
@@ -90,7 +108,7 @@ export function AlertFeedTable({
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Filter county, route, or alert..."
+            placeholder="Filter county, route, shelter, or alert..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-8 text-xs"
@@ -114,8 +132,14 @@ export function AlertFeedTable({
           <TabsTrigger value="txdot" className="text-xs flex items-center gap-1">
             <Car className="w-3.5 h-3.5" /> TxDOT Roads ({counts.txdot})
           </TabsTrigger>
+          <TabsTrigger
+            value="resources"
+            className="text-xs flex items-center gap-1"
+          >
+            <TentTree className="w-3.5 h-3.5" /> Aid Resources ({counts.resources})
+          </TabsTrigger>
           <TabsTrigger value="polygon" className="text-xs">
-            Polygons Only ({counts.polygon})
+            On Map ({counts.polygon})
           </TabsTrigger>
           <TabsTrigger value="bulletin" className="text-xs">
             County Advisories ({counts.bulletin})

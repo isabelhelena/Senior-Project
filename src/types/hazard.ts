@@ -19,6 +19,53 @@ export type DisasterCategory =
 export type UrgencyLevel = "low" | "medium" | "severe" | "critical" | "unknown";
 
 /**
+ * High-level filter categories for the Shelters & Aid tab
+ */
+export type ResourceGroupKey =
+  | "shelters"
+  | "food_water"
+  | "medical"
+  | "responders"
+  | "community_aid";
+
+/**
+ * Granular OpenStreetMap emergency_resources.resource_type values
+ */
+export type EmergencyResourceType =
+  | "hospital"
+  | "clinic"
+  | "pharmacy"
+  | "doctor"
+  | "ambulance_station"
+  | "fire_station"
+  | "police_station"
+  | "shelter"
+  | "disaster_response"
+  | "assembly_point"
+  | "food_bank"
+  | "soup_kitchen"
+  | "community_centre"
+  | "drinking_water"
+  | "other";
+
+/**
+ * Verified OpenStreetMap emergency resource from `get_nearby_emergency_resources`
+ */
+export interface EmergencyResource {
+  id: string;
+  osmId: string;
+  name: string;
+  resourceType: EmergencyResourceType;
+  group: Exclude<ResourceGroupKey, "community_aid">;
+  address?: string | null;
+  phone?: string | null;
+  distMeters: number;
+  distMiles: number;
+  coordinates: [number, number]; // [longitude, latitude]
+  verified: true;
+}
+
+/**
  * Standardized data contract across all Texas crisis data providers
  * (NWS, TxDOT, OpenStreetMap, and Bluesky social signals).
  */
@@ -38,6 +85,14 @@ export interface UnifiedHazard {
   expiresAt?: string;
   createdAt?: string;
   rawProperties?: Record<string, unknown>;
+  resourceGroup?: ResourceGroupKey;
+  resourceSubtype?: string;
+  verified?: boolean;
+  address?: string | null;
+  phone?: string | null;
+  distanceMiles?: number | null;
+  coordinates?: [number, number];
+  authorHandle?: string;
 }
 
 /**
