@@ -163,6 +163,7 @@ export default function CrisisMap() {
     () => pannedCenter ?? [location.lng, location.lat],
     [location.lat, location.lng, pannedCenter],
   );
+  const [isMapReady, setIsMapReady] = useState(false);
 
   const mapStyle = resolvedTheme === "light" ? CARTO_LIGHT : CARTO_DARK;
   const zoomedOutForResources = viewportZoom < MIN_RESOURCE_ZOOM;
@@ -649,6 +650,7 @@ export default function CrisisMap() {
     <div
       ref={containerRef}
       className="flex min-h-screen w-full flex-col bg-background text-foreground"
+      data-map-loaded={isMapReady ? "true" : "false"}
     >
       <SupportHeader />
 
@@ -774,9 +776,11 @@ export default function CrisisMap() {
           onLoad={() => {
             ensureMapIcons();
             moveToSelectedLocation();
+            setIsMapReady(true);
           }}
           onStyleData={ensureMapIcons}
           onMoveEnd={handleMapMoveEnd}
+          onError={(e) => console.error("Map error event:", e)}
           maxPitch={0}
           minPitch={0}
           pitchWithRotate={false}

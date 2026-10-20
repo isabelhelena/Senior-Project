@@ -161,4 +161,10 @@ The Next.js frontend (App Router) provides diagnostic views and the primary geos
   - **Telemetry Table**: A comprehensive inspector below the map displaying all Texas advisories (including non-polygon county bulletins) with full text search and click-to-fly navigation.
   - Full details: [src/app/test-map/README.md](src/app/test-map/README.md).
 - **Diagnostics Feed (`/test-feed`)**:
-  Open **http://localhost:3000/test-feed** to inspect statewide NWS and TxDOT snapshots stored in Supabase. Current weather observations still use the selected coordinates.
+  Open **http://localhost:3000/test-feed** to test raw NWS and TxDOT feed responses against local coordinates.
+- **E2E Testing (Playwright)**:
+  Run end-to-end tests across Chromium, Firefox, and WebKit:
+  ```powershell
+  npm run test:e2e
+  ```
+  See [Playwright Testing Guide](documentation/Playwright.md) for full setup instructions on Windows and Linux (including WSL2), headless WebGL requirements, UI mode, and troubleshooting.

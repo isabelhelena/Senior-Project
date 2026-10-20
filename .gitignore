@@ -46,12 +46,10 @@ next-env.d.ts
 workers/bluesky/data/
 !workers/bluesky/.env.example
 
-# Supabase
-**/supabase/.temp
-**/supabase/.branches
-.supabase/
-
-workers/official/data/
-!workers/official/.env.example
-!.env.example
-.npm-cache/
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
