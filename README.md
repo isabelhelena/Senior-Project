@@ -6,18 +6,19 @@ Python workers for NWS, TxDOT, and Bluesky, and an offline classroom demo.
 ## Current status
 
 - **Official alerts:** NWS and filtered TxDOT Roadway Status data are stored in Supabase, with opt-in 10-minute polling, polygon resolution, and expired/resolved record cleanup.
+- **Emergency resources:** Over 21,000 Texas OpenStreetMap facilities (shelters, food/water stations, hospitals/clinics/pharmacies, and fire/police/EMS stations) are seeded in Supabase `emergency_resources` and queried spatially via PostGIS (`get_nearby_emergency_resources`).
 - **Social ingestion:** The Bluesky worker filters, extracts, geocodes, and saves reports. Shared category/urgency mappings and an offline demo are implemented.
-- **Map:** `/test-map` displays stored official alerts, weather, layer controls, and an inspection drawer. Social and aid-resource markers still use fixtures.
+- **Map:** `/test-map` displays stored official alerts, live nearby OpenStreetMap emergency resources (with WebGL clustering, 5 distinct category icons, keyword search, and viewport auto-fetching), weather, layer controls, and a unified inspection drawer. Social markers still use fixtures.
 - **Tests:** Python worker/demo tests and TypeScript classification/validation tests exist; browser and API security coverage remains unfinished.
 
 ## To do
 
-Updated against the [milestone progress report](<Milestone Progress Report - Lone Star Support.pdf>) and current code. The report's NWS/TxDOT ingestion task and missing-polygon resolution are now complete.
+Updated against the [milestone progress report](<Milestone Progress Report - Lone Star Support.pdf>) and current code. The report's NWS/TxDOT ingestion task, missing-polygon resolution, and OpenStreetMap emergency resource integration are now complete.
 
 ### Connect the remaining data
 
 - [ ] **Live social map:** Read `social_alerts` through a server endpoint, apply the shared mappings, and replace mock markers. Add freshness filtering and expired-report cleanup.
-- [ ] **Emergency facilities:** Import hospitals, fire stations, and shelter locations from OSM Overpass into `emergency_resources`; query and display nearby facilities.
+- [x] **Emergency facilities:** Import hospitals, fire stations, water stations, and shelter locations from OSM Overpass into `emergency_resources`; query and display nearby facilities with category filters, clustering, and search.
 - [ ] **Community submissions:** Connect `/report` to validated server-side persistence in `community_reports`, then display accepted reports. The current form only validates locally.
 - [ ] **Moderation:** Add content filtering, submission rate limits, and an authenticated review interface for community reports.
 
@@ -26,18 +27,22 @@ Updated against the [milestone progress report](<Milestone Progress Report - Lon
 - [ ] **Integration and security tests:** Add the planned Playwright/Pytest coverage for browser flows, API validation, database access permissions, and ingestion failures. Keep existing unit tests.
 - [ ] **Mobile polish:** Verify map gestures, navigation, drawers, and report forms on small touch screens; fix layout and usability gaps in the existing responsive UI.
 
-## NWS and TxDOT ingestion
+## NWS, TxDOT, and OpenStreetMap ingestion
 
-Python workers now store official alerts in Supabase, and the map reads that
-stored data. NWS zone boundaries are resolved into polygons. TxDOT excludes
-open-to-traffic, artificial-centerline, and proposed roads. Worker runs remove
-expired/resolved alerts and avoid duplicates. Current weather observations are unchanged.
+Python workers store official alerts and OpenStreetMap emergency infrastructure in
+Supabase, and the map reads that stored data. NWS zone boundaries are resolved into
+polygons. TxDOT excludes open-to-traffic, artificial-centerline, and proposed roads.
+Worker runs remove expired/resolved alerts and avoid duplicates. OpenStreetMap
+facilities are indexed in `emergency_resources` and queried by radius, category, and
+search terms via the `get_nearby_emergency_resources` PostGIS RPC. Current weather
+observations are unchanged.
 
 **Setup** (Python 3.12+, from the project root):
 
-1. Apply [the migration](supabase/migrations/20261013000000_official_ingestion.sql)
-   in Supabase SQL Editor if not already applied. The existing project is set up.
-2. Install the worker dependencies:
+1. Apply the Supabase migrations in the SQL Editor if not already applied:
+   - [Official ingestion migration](supabase/migrations/20261013000000_official_ingestion.sql)
+   - [Emergency resources RPC upgrade migration](supabase/migrations/20261012233500_upgrade_emergency_resources_rpc.sql)
+2. Install the official worker dependencies:
 
    ```powershell
    python -m venv workers/official/.venv
@@ -47,8 +52,10 @@ expired/resolved alerts and avoid duplicates. Current weather observations are u
 3. Use the example files to configure:
    - `workers/official/.env`: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
      `NWS_USER_AGENT` with a contact email or project URL.
-   - Root `.env.local`: `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
-     Keep the service-role key in the worker only. Restart Next.js after changes.
+   - `workers/emergency_resources/.env`: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+     (used when running `python workers/emergency_resources/seed_emergency_resources.py`).
+   - Root `.env.local`: `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (or `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
+     Keep the service-role key in worker environments only. Restart Next.js after changes.
 
 **Polling controls** (PowerShell):
 
@@ -155,10 +162,11 @@ The Next.js frontend (App Router) provides diagnostic views and the primary geos
   ```
 - **Disaster Map Interface (`/test-map`)**:
   Open **http://localhost:3000/test-map**.
-  - **Live WebGL Visualization**: GPU-rendered NWS weather polygons (colored by severity) and TxDOT road closures with dashed outlines.
+  - **Live WebGL Visualization**: GPU-rendered NWS weather polygons (colored by severity), TxDOT road closures with dashed outlines, and clustered OpenStreetMap emergency resource pins with 5 custom category icons.
+  - **Shelters & Aid Panel**: Combines verified OpenStreetMap infrastructure (**Shelters & Relief**, **Food & Water**, **Medical**, **Responders**) with unverified **Community Aid** reports, featuring keyword search, **"Search this area"** on map pan, and a toggle for unnamed water taps & park shelters.
   - **Theme-Aware Basemaps**: Dynamically switches between CARTO Dark Matter and Positron (Light) vector basemaps.
-  - **Inspection Drawer**: Click any alert or road segment to inspect official instructions, affected counties, countdown timers, and spatially matched community reports.
-  - **Telemetry Table**: A comprehensive inspector below the map displaying all Texas advisories (including non-polygon county bulletins) with full text search and click-to-fly navigation.
+  - **Unified Inspection Drawer**: Click any alert, road segment, or aid resource POI to inspect verification status, copyable street addresses, clickable phone numbers, Google Maps directions, official instructions, and spatially matched community reports.
+  - **Telemetry Table**: A comprehensive inspector below the map displaying all Texas advisories and loaded aid resources with full text search and click-to-fly navigation.
   - Full details: [src/app/test-map/README.md](src/app/test-map/README.md).
 - **Diagnostics Feed (`/test-feed`)**:
   Open **http://localhost:3000/test-feed** to test raw NWS and TxDOT feed responses against local coordinates.

@@ -10,11 +10,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Lone Star Support project guide
 
-This repository is a Texas disaster-information project with three active parts today:
+This repository is a Texas disaster-information project with four active parts today:
 
-- A Next.js frontend in `src/` for diagnostics, map-oriented UI work, and future alert display.
+- A Next.js frontend in `src/` for diagnostics, a full MapLibre crisis map with official alerts and emergency resources in `/test-map`, and future live social alerts.
 - Standalone Python workers under `workers/bluesky/` for Bluesky ingestion, filtering, Gemini extraction, geocoding, and Supabase persistence.
 - Official feed ingestion under `workers/official/` for NWS zone polygons and filtered TxDOT roads. It runs once by default; `polling.ps1 on/off/status/once` controls opt-in ten-minute Windows polling.
+- Emergency resources seeding under `workers/emergency_resources/` for OpenStreetMap Texas shelters, food/water, medical facilities, and emergency responders stored in Supabase `emergency_resources`.
 
 The project is still evolving toward the broader Lone Star Support architecture described in the milestone plan: public data ingestion for NWS, TxDOT, and OSM; a unified map with alerts; and a true geospatial disaster dashboard. The current codebase is the operational baseline, not the final end-state. We should match the current stack and implementation patterns while keeping the roadmap and product goals in view.
 
@@ -37,9 +38,9 @@ Use the actual project files in this repo when making decisions:
 
 - Next.js app using the App Router under `src/app/`.
 - Reusable UI components live under `src/components/ui/` and custom app components under `src/components/`.
-- The app is currently a diagnostics/readout layer and is separate from the Python worker pipeline.
+- `/test-map` is the primary interactive crisis map displaying official NWS/TxDOT alerts, live OpenStreetMap emergency resources (with 5-category filtering, MapLibre clustering, viewport auto-fetching, and search), and community chatter.
+- `/test-feed` provides diagnostic readouts of stored official alerts and observations.
 - Use `npm ci` and `npm run dev` for local frontend development.
-- The eventual product direction includes a map dashboard with official alerts and social reports layered together, but this is not yet fully implemented in the current code.
 
 ### Python workers
 
@@ -49,6 +50,8 @@ The worker pipeline is implemented as standalone Python scripts rather than a we
 - `workers/bluesky/worker.py` handles Bluesky ingestion, Gemini calls, Photon geocoding, and Supabase persistence.
 - `workers/bluesky/demo.py` runs the offline presentation/demo flow without external credentials.
 - `workers/bluesky/verify_storage.py` checks insert, update, and cleanup behavior in live storage.
+- `workers/official/worker.py` handles NWS and TxDOT official telemetry ingestion into Supabase `public_alerts`.
+- `workers/emergency_resources/seed_emergency_resources.py` seeds OpenStreetMap emergency facilities into Supabase `emergency_resources`.
 
 The current live flow is:
 
