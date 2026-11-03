@@ -20,6 +20,13 @@ export const INCIDENT_SEVERITIES = [
 export const DESCRIPTION_MIN_LENGTH = 20
 export const DESCRIPTION_MAX_LENGTH = 1000
 
+export const REPORT_STATUSES = ["pending", "approved", "rejected"] as const
+export type ReportStatus = (typeof REPORT_STATUSES)[number]
+
+export function isReportStatus(value: unknown): value is ReportStatus {
+  return REPORT_STATUSES.some((status) => status === value)
+}
+
 export type IncidentCategory = (typeof INCIDENT_CATEGORIES)[number]["value"]
 export type IncidentSeverity = (typeof INCIDENT_SEVERITIES)[number]["value"]
 export type ReportLocationSource = "gps" | "zip" | "map" | "fallback"

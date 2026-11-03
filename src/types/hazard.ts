@@ -75,7 +75,7 @@ export interface EmergencyResource {
  */
 export interface UnifiedHazard {
   id: string;
-  source: "nws" | "txdot" | "osm" | "bluesky";
+  source: "nws" | "txdot" | "osm" | "bluesky" | "community";
   externalId: string;
   headline: string;
   description?: string;

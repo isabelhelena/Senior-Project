@@ -124,6 +124,7 @@ export function MapInformationPanel({
   const details = sectionDetails[section];
   const Icon = details.icon;
   const layerVisible = visibility[details.layer];
+  const approvedSubmissions = hazards.filter((hazard) => hazard.source === "community");
 
   return (
     <aside
@@ -213,11 +214,26 @@ export function MapInformationPanel({
           />
         )}
         {section === "community" && (
-          <ReportList
-            reports={communityReports}
-            emptyLabel="No community reports are currently available."
-            onLocate={onLocateReport}
-          />
+          <div className="space-y-5">
+            <section className="space-y-3">
+              <h3 className="text-sm font-semibold">Reviewed submissions</h3>
+              <p className="text-xs text-muted-foreground">Reviewed for publication; reports have not been independently verified.</p>
+              {approvedSubmissions.length === 0 && <EmptyState label="No approved submissions in the last 24 hours." />}
+              {approvedSubmissions.map((hazard) => (
+                <article key={hazard.id} className="space-y-2 rounded-2xl bg-muted/65 p-3.5">
+                  <p className="text-sm font-medium">{hazard.headline}</p>
+                  <p className="break-words text-sm">{hazard.description}</p>
+                  <LocateButton onClick={() => onLocateHazard(hazard)} />
+                </article>
+              ))}
+            </section>
+            <h3 className="text-sm font-semibold">Bluesky demo reports</h3>
+            <ReportList
+              reports={communityReports}
+              emptyLabel="No community reports are currently available."
+              onLocate={onLocateReport}
+            />
+          </div>
         )}
       </div>
     </aside>

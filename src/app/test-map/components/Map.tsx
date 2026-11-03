@@ -69,6 +69,7 @@ import { CompactWeatherOverlay } from "./CompactWeatherOverlay";
 import { MapInformationPanel } from "./MapInformationPanel";
 import { SupportHeader } from "./SupportHeader";
 import { MOCK_SOCIAL_ALERTS } from "../data/mockSocialAlerts";
+import { normalizeCommunityReport } from "@/lib/community-report-feed";
 
 if (typeof window !== "undefined") {
   setWorkerUrl("/maplibre-gl-worker.mjs");
@@ -197,9 +198,10 @@ export default function CrisisMap() {
     fetching.current = true;
     setError(null);
     try {
-      const [nwsRes, txdotRes] = await Promise.allSettled([
+      const [nwsRes, txdotRes, communityRes] = await Promise.allSettled([
         fetchHazards("/api/alerts", normalizeNwsAlert),
         fetchHazards("/api/road-conditions", normalizeTxDotRoad),
+        fetchHazards("/api/community-reports", normalizeCommunityReport),
       ]);
 
       const loadedHazards: UnifiedHazard[] = [];
@@ -208,6 +210,7 @@ export default function CrisisMap() {
       for (const [label, result] of [
         ["Weather alerts", nwsRes],
         ["Road conditions", txdotRes],
+        ["Community submissions", communityRes],
       ] as const) {
         if (result.status === "rejected") {
           warnings.push(`${label} are unavailable.`);
@@ -430,8 +433,11 @@ export default function CrisisMap() {
   );
 
   const communityGeoJson = useMemo(
-    () => socialReportsToGeoJson(communityReports),
-    [communityReports],
+    () => ({ type: "FeatureCollection" as const, features: [
+      ...socialReportsToGeoJson(communityReports).features,
+      ...hazardsToGeoJson(hazards.filter((hazard) => hazard.source === "community")).features,
+    ] }),
+    [communityReports, hazards],
   );
 
   const nearbyResourceReports = useMemo(

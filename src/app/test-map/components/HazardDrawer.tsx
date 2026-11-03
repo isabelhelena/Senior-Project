@@ -670,6 +670,7 @@ function sourceLabel(
     txdot: "Road condition",
     osm: "Verified map resource",
     bluesky: "Community report",
+    community: "Reviewed community submission",
   };
 
   return labels[source];

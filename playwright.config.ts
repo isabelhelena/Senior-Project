@@ -55,7 +55,10 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: process.env.CI ? 'npm run build && npm run start' : 'npm run dev',
+    // Direct Node entrypoints avoid Windows command-shim failures in paths containing &.
+    command: process.env.CI
+      ? 'node node_modules/next/dist/bin/next build && node node_modules/next/dist/bin/next start'
+      : 'node node_modules/next/dist/bin/next dev',
     url: 'http://127.0.0.1:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
