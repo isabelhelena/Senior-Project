@@ -64,3 +64,4 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+skills/system/run-workflow/
