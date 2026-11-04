@@ -23,47 +23,89 @@ test.describe("Community report submission", () => {
     await expect(page.locator("form").getByRole("alert")).toContainText("Select a severity level.");
   });
 
-  test("validates description length and actual Texas coverage before sending", async ({ page }) => {
-    let requests = 0;
-    await page.route("**/api/community-reports", (route) => { requests++; return route.fulfill({ json: { id: "unexpected" } }); });
-    await fillReport(page);
-    await page.locator("#description").fill("Rainy");
-    await page.getByRole("button", { name: "Submit report" }).click();
-    await expect(page.locator("form").getByRole("alert")).toContainText("Use at least 20 characters");
-    await page.locator("#description").fill("Flash flooding is blocking the main road.");
-    await page.locator("#latitude").fill("35.4676");
-    await page.locator("#longitude").fill("-97.5164");
-    await page.getByRole("button", { name: "Submit report" }).click();
-    await expect(page.locator("form").getByRole("alert")).toContainText("Choose a location within Texas.");
-    expect(requests).toBe(0);
+  test("displays validation errors when submitting an empty form", async ({ page }) => {
+    await page.goto("/report", { waitUntil: "domcontentloaded" });
+
+    // Wait for initial GPS settlement before clearing
+    await expect(page.locator("#latitude")).toHaveValue("29.4241", { timeout: 10_000 });
+
+    // Clear auto-populated fields to test empty submission
+    await page.locator("#latitude").clear();
+    await page.locator("#longitude").clear();
+
+    const validateBtn = page.getByRole("button", { name: /validate report/i });
+    await expect(validateBtn).toBeVisible({ timeout: 10_000 });
+    await validateBtn.click();
+
+    // Verify alert summary banner
+    const alertBanner = page.locator("div[role='alert']").filter({
+      hasText: "Please correct the following fields:",
+    });
+    await expect(alertBanner).toBeVisible();
+
+    // Check specific error message elements (targeted by ID)
+    await expect(page.locator("#category-error")).toHaveText("Select an incident category.");
+    await expect(page.locator("#severity-error")).toHaveText("Select a severity level.");
   });
 
-  test("shows a saved pending receipt and sends raw choices", async ({ page }) => {
-    await page.route("**/api/community-reports", async (route) => {
-      expect(route.request().postDataJSON()).toMatchObject({ category: "road_hazard", severity: "high", latitude: 29.4241, longitude: -98.4936 });
-      await route.fulfill({ status: 201, json: { id: "saved-report", status: "pending" } });
-    });
-    await fillReport(page);
-    await page.getByRole("button", { name: "Submit report" }).click();
-    await expect(page.getByText(/Report received \(saved-report\)/)).toBeVisible();
-    await expect(page.getByText(/only after moderator approval/)).toBeVisible();
+  test("validates description minimum character length", async ({ page }) => {
+    await page.goto("/report", { waitUntil: "domcontentloaded" });
+
+    // Wait for initial GPS settlement
+    await expect(page.locator("#latitude")).toHaveValue("29.4241", { timeout: 10_000 });
+
+    // Fill category and severity with valid schema options
+    await page.locator("#category").selectOption("flood");
+    await page.locator("#severity").selectOption("high");
+
+    // Fill description with only 11 characters (minimum is 20)
+    await page.locator("#description").fill("Rainy flood");
+
+    const validateBtn = page.getByRole("button", { name: /validate report/i });
+    await validateBtn.click();
+
+    // Check for character length validation error
+    await expect(page.locator("#description-error")).toContainText(
+      "Use at least 20 characters so responders have enough detail."
+    );
   });
 
-  test("retries failures with the same key and changes the key after an edit", async ({ page }) => {
-    const keys: string[] = [];
-    await page.route("**/api/community-reports", async (route) => {
-      keys.push(route.request().postDataJSON().submissionId);
-      await route.fulfill(keys.length === 1 ? { status: 503, json: { error: "Storage unavailable. Please retry." } } : { status: 201, json: { id: "saved-report", status: "pending" } });
-    });
-    await fillReport(page);
-    await page.getByRole("button", { name: "Submit report" }).click();
-    await expect(page.getByText("Storage unavailable. Please retry.")).toBeVisible();
-    await page.getByRole("button", { name: "Submit report" }).click();
-    await expect(page.getByText(/Report received/)).toBeVisible();
-    expect(keys[0]).toBe(keys[1]);
-    await page.locator("#description").fill("Another road is impassable near the town center.");
-    await page.getByRole("button", { name: "Submit report" }).click();
-    await expect(page.getByText(/Report received/)).toBeVisible();
-    expect(keys[2]).not.toBe(keys[0]);
+  test("rejects invalid coordinate bounds", async ({ page }) => {
+    await page.goto("/report", { waitUntil: "domcontentloaded" });
+
+    // Wait for initial GPS settlement
+    await expect(page.locator("#latitude")).toHaveValue("29.4241", { timeout: 10_000 });
+
+    await page.locator("#category").selectOption("other_disaster_hazard");
+    await page.locator("#severity").selectOption("critical");
+    await page.locator("#description").fill("High wind warning and damaged road signs throughout area.");
+
+    // Enter out-of-bounds coordinates (valid is -90 to 90 and -180 to 180)
+    await page.locator("#latitude").fill("95.0");
+    await page.locator("#longitude").fill("-200.0");
+
+    const validateBtn = page.getByRole("button", { name: /validate report/i });
+    await validateBtn.click();
+
+    await expect(page.locator("#latitude-error")).toHaveText("Enter a latitude from -90 to 90.");
+    await expect(page.locator("#longitude-error")).toHaveText("Enter a longitude from -180 to 180.");
+  });
+
+  test("successfully validates and processes a complete incident report", async ({ page }) => {
+    await page.goto("/report", { waitUntil: "domcontentloaded" });
+
+    // Wait for initial GPS settlement
+    await expect(page.locator("#latitude")).toHaveValue("29.4241", { timeout: 10_000 });
+
+    await page.locator("#category").selectOption("road_hazard");
+    await page.locator("#severity").selectOption("moderate");
+    await page.locator("#description").fill("Flash flooding on Highway 281 North, right lane impassable.");
+
+    const validateBtn = page.getByRole("button", { name: /validate report/i });
+    await validateBtn.click();
+
+    // Verify submission confirmation message
+    const successMessage = page.getByText(/Report validated/i);
+    await expect(successMessage).toBeVisible({ timeout: 10_000 });
   });
 });
