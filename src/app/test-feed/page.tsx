@@ -49,7 +49,7 @@ export default function DiagnosticsPage() {
   const testNWS = async () => {
     setNws((prev) => ({ ...prev, loading: true, status: 'idle', error: undefined }));
     try {
-      const res = await fetch(`/api/alerts?lat=${location.lat}&lng=${location.lng}`);
+      const res = await fetch("/api/alerts");
       const json = (await res.json()) as GeoJsonData;
 
       if (!res.ok) throw new Error(json.error || 'Failed to fetch NWS alerts');
@@ -76,7 +76,7 @@ export default function DiagnosticsPage() {
   const testTxDOT = async () => {
     setTxdot((prev) => ({ ...prev, loading: true, status: 'idle', error: undefined }));
     try {
-      const res = await fetch(`/api/road-conditions?lat=${location.lat}&lng=${location.lng}&radius=25`);
+      const res = await fetch("/api/road-conditions");
       const json = (await res.json()) as GeoJsonData;
 
       if (!res.ok) throw new Error(json.error || 'Failed to fetch TxDOT data');
@@ -167,19 +167,19 @@ export default function DiagnosticsPage() {
           <WeatherSummaryCard lat={location.lat} lng={location.lng} />
         </div>
 
-        {/* Localized NWS Alert Probe */}
+        {/* Stored NWS Alert Probe */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
               <CardTitle className="text-base">NWS Active Alerts</CardTitle>
-              <CardDescription className="text-xs font-mono">point={location.lat},{location.lng}</CardDescription>
+              <CardDescription className="text-xs font-mono">Stored statewide snapshot</CardDescription>
             </div>
             {nws.status === 'success' && <Badge variant="outline" className="text-emerald-600 border-emerald-500">Connected</Badge>}
             {nws.status === 'error' && <Badge variant="destructive">Failed</Badge>}
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Impacting Area:</span>
+              <span className="text-muted-foreground">Across Texas:</span>
               <span className="font-semibold">{nws.count} active alerts</span>
             </div>
             <div className="flex items-center justify-between text-sm">
@@ -194,24 +194,24 @@ export default function DiagnosticsPage() {
             )}
             <Button onClick={testNWS} variant="secondary" size="sm" className="w-full" disabled={nws.loading}>
               {nws.loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-              Probe NWS Point
+              Read Stored NWS Alerts
             </Button>
           </CardContent>
         </Card>
 
-        {/* Localized TxDOT Roadway Closure Probe */}
+        {/* Stored TxDOT Roadway Probe */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
               <CardTitle className="text-base">TxDOT Road Hazards</CardTitle>
-              <CardDescription className="text-xs font-mono">radius=25mi</CardDescription>
+              <CardDescription className="text-xs font-mono">Stored statewide snapshot</CardDescription>
             </div>
             {txdot.status === 'success' && <Badge variant="outline" className="text-emerald-600 border-emerald-500">Connected</Badge>}
             {txdot.status === 'error' && <Badge variant="destructive">Failed</Badge>}
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Nearby Hazards:</span>
+              <span className="text-muted-foreground">Across Texas:</span>
               <span className="font-semibold">{txdot.count} features</span>
             </div>
             <div className="flex items-center justify-between text-sm">
@@ -226,7 +226,7 @@ export default function DiagnosticsPage() {
             )}
             <Button onClick={testTxDOT} variant="secondary" size="sm" className="w-full" disabled={txdot.loading}>
               {txdot.loading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-              Probe TxDOT Envelope
+              Read Stored TxDOT Conditions
             </Button>
           </CardContent>
         </Card>
@@ -235,14 +235,14 @@ export default function DiagnosticsPage() {
       {/* Raw Payload Inspector */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">GeoJSON Inspector (Localized to Selected Area)</CardTitle>
+          <CardTitle className="text-base">GeoJSON Inspector (Stored Texas Alerts)</CardTitle>
           <CardDescription>Review raw attributes and verify geometry completeness.</CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="nws">
             <TabsList className="mb-2">
-              <TabsTrigger value="nws">NWS Point Alert Feature</TabsTrigger>
-              <TabsTrigger value="txdot">TxDOT Envelope Hazard Feature</TabsTrigger>
+              <TabsTrigger value="nws">Stored NWS Feature</TabsTrigger>
+              <TabsTrigger value="txdot">Stored TxDOT Feature</TabsTrigger>
             </TabsList>
             <TabsContent value="nws">
               <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto max-h-72 font-mono">

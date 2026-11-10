@@ -60,14 +60,21 @@ Transition the frontend from a raw diagnostic tool into a slick, responsive geos
 - [ ] **Freshness Filtering**: Query the last 24 hours of reports by default (`created_at >= NOW() - INTERVAL '24 hours'`), with UI time-filter pills (`6h` / `12h` / `24h`) in the layer dock.
 - [ ] **Developer Fallback**: Gracefully fall back to mock fixtures if `SUPABASE_URL` is unconfigured, keeping local development resilient.
 
-#### Phase 5: Critical Infrastructure & Shelters
+#### Phase 5: Critical Infrastructure & Shelters (Completed)
 
-- [ ] **OpenStreetMap POIs**: Import and visualize designated warming/cooling shelters and hospital triage centers from the `emergency_resources` table.
-- [ ] **POI Clustering**: Implement WebGL marker clustering for high-density city shelter points.
+- [x] **OpenStreetMap POIs**: Imported over 21k Texas shelters, food banks, soup kitchens, drinking water taps, hospitals, clinics, pharmacies, and responder stations into `emergency_resources`. Queried via PostGIS RPC `get_nearby_emergency_resources` through `/api/emergency-resources`.
+- [x] **POI Clustering & Custom Icons**: Implemented WebGL marker clustering with procedural high-DPI category badge icons (Shelters & Relief, Food & Water, Medical, Responders, Community Aid).
+- [x] **Shelters & Aid Panel & Inspection**: High-level category chips, unnamed tap/shelter toggle, keyword search with viewport "Search this area", and unified inspection drawer with copyable address, call link, and Google Maps directions.
 
 ---
 
-## Milestone 2: Official data ingestion & backend consolidation (Upcoming)
+## Milestone 2: Official data ingestion & backend consolidation (In Progress)
+
+NWS and TxDOT ingestion is implemented in `workers/official/`: opt-in ten-minute local
+scheduling, NWS affected-zone polygon resolution, atomic Supabase snapshots,
+deduplication, expiry/removal cleanup, and storage-backed map routes. See the
+[operational guide](workers/official/README.md). OSM ingestion and a unified
+bounding-box endpoint remain future work.
 
 ### Goal
 

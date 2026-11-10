@@ -51,6 +51,10 @@ workers/bluesky/.venv/Scripts/python.exe -m unittest discover -s workers/bluesky
 
 ## Storage and processing
 
+Stored categories and urgency retain the worker's original vocabulary. Frontend
+consumers must use the [classification adapter](../../documentation/Alert_Classification.md)
+to convert values such as `moderate` to `medium` while preserving source labels.
+
 - `bluesky_uri`: canonical `at://did/.../record-key`, also the upsert conflict key.
 - `summary`: model summary, with an explicit approximate-location suffix for city centroids.
 - `category`: `flood`, `severe_weather`, `wildfire`, `power_outage`, `road_hazard`, `shelter`, or `mutual_aid`.

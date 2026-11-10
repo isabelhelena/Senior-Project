@@ -8,23 +8,39 @@ import {
   Marker,
   type MapRef,
   type MapLayerMouseEvent,
+  type ViewStateChangeEvent,
 } from "react-map-gl/maplibre";
-import { setWorkerUrl } from "maplibre-gl";
+import { setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useTheme } from "next-themes";
 import bbox from "@turf/bbox";
 import Link from "next/link";
-import { Loader2, AlertCircle, MapPin, TriangleAlert } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  MapPin,
+  TriangleAlert,
+  Search,
+  ZoomIn,
+} from "lucide-react";
 
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { useLocation } from "@/context/LocationContext";
 import { useCurrentWeather } from "@/hooks/use-current-weather";
 import { cn } from "@/lib/utils";
-import type { UnifiedHazard } from "@/types/hazard";
-import type { SocialAlert } from "@/types/hazard";
+import type {
+  EmergencyResource,
+  ResourceGroupKey,
+  SocialAlert,
+  UnifiedHazard,
+} from "@/types/hazard";
 import {
+  DEFAULT_ACTIVE_RESOURCE_GROUPS,
   distanceMiles,
+  emergencyResourceToHazard,
+  getActiveOsmTypesForGroups,
   isAidResourceReport,
+  socialAidReportToHazard,
 } from "@/lib/community-resources";
 import {
   normalizeNwsAlert,
@@ -36,7 +52,10 @@ import {
   nwsHazardOutlineLayer,
   txdotRoadLayer,
   socialAlertsPointLayer,
+  aidResourcesClusterLayer,
+  aidResourcesClusterCountLayer,
   aidResourcesPointLayer,
+  registerResourceIconsOnMap,
 } from "./MapLayers";
 import { HazardDrawer } from "./HazardDrawer";
 import { AlertFeedTable } from "./AlertFeedTable";
@@ -50,6 +69,7 @@ import { CompactWeatherOverlay } from "./CompactWeatherOverlay";
 import { MapInformationPanel } from "./MapInformationPanel";
 import { SupportHeader } from "./SupportHeader";
 import { MOCK_SOCIAL_ALERTS } from "../data/mockSocialAlerts";
+import { normalizeCommunityReport } from "@/lib/community-report-feed";
 
 if (typeof window !== "undefined") {
   setWorkerUrl("/maplibre-gl-worker.mjs");
@@ -68,13 +88,27 @@ const TEXAS_VIEWPORT = {
 };
 
 const SELECTED_LOCATION_ZOOM = 10;
+const MIN_RESOURCE_ZOOM = 8;
 
-type NwsFeature = Parameters<typeof normalizeNwsAlert>[0];
-type TxDotFeature = Parameters<typeof normalizeTxDotRoad>[0];
+async function fetchHazards<T>(path: string, normalize: (feature: T) => UnifiedHazard) {
+  const response = await fetch(path, { signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error("Stored feed unavailable");
+  const data = await response.json() as { features: T[]; stale: boolean };
+  if (!Array.isArray(data.features)) throw new Error("Invalid stored feed");
+  return { hazards: data.features.map(normalize), stale: data.stale };
+}
+
+function computeRadiusMetersForZoom(zoom: number): number {
+  if (zoom >= 13) return 12000;
+  if (zoom >= 11) return 22000;
+  if (zoom >= 9.5) return 32000;
+  return 45000;
+}
 
 export default function CrisisMap() {
   const mapRef = useRef<MapRef>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const fetching = useRef(false);
   const { resolvedTheme } = useTheme();
   const { location, setFromMap } = useLocation();
   const weather = useCurrentWeather(
@@ -87,6 +121,7 @@ export default function CrisisMap() {
   const [selectedHazard, setSelectedHazard] = useState<UnifiedHazard | null>(
     null,
   );
+  const [openedResourceFromPanel, setOpenedResourceFromPanel] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,50 +136,186 @@ export default function CrisisMap() {
     resources: true,
   });
 
+  // Emergency resources state
+  const [verifiedResources, setVerifiedResources] = useState<
+    EmergencyResource[]
+  >([]);
+  const [resourcesLoading, setResourcesLoading] = useState(false);
+  const [resourcesError, setResourcesError] = useState<string | null>(null);
+  const [activeResourceGroups, setActiveResourceGroups] = useState<
+    ResourceGroupKey[]
+  >(DEFAULT_ACTIVE_RESOURCE_GROUPS);
+  const [resourceSearchQuery, setResourceSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [includeUnnamedResources, setIncludeUnnamedResources] = useState(false);
+
+  // Viewport tracking for auto-fetch on pan & "Search this area"
+  const [pannedCenter, setPannedCenter] = useState<[number, number] | null>(
+    null,
+  );
+  const [viewportZoom, setViewportZoom] = useState<number>(
+    SELECTED_LOCATION_ZOOM,
+  );
+  const [lastQueriedCenter, setLastQueriedCenter] = useState<
+    [number, number] | null
+  >(null);
+
+  const viewportCenter = useMemo<[number, number]>(
+    () => pannedCenter ?? [location.lng, location.lat],
+    [location.lat, location.lng, pannedCenter],
+  );
+  const [isMapReady, setIsMapReady] = useState(false);
+
   const mapStyle = resolvedTheme === "light" ? CARTO_LIGHT : CARTO_DARK;
+  const zoomedOutForResources = viewportZoom < MIN_RESOURCE_ZOOM;
+
+  const hasPendingAreaSearch = useMemo(() => {
+    if (
+      zoomedOutForResources ||
+      !debouncedSearchQuery ||
+      !lastQueriedCenter
+    ) {
+      return false;
+    }
+    return distanceMiles(lastQueriedCenter, viewportCenter) >= 1.2;
+  }, [
+    debouncedSearchQuery,
+    lastQueriedCenter,
+    viewportCenter,
+    zoomedOutForResources,
+  ]);
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchQuery(resourceSearchQuery.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [resourceSearchQuery]);
 
   const fetchTelemetry = useCallback(async () => {
+    if (fetching.current) return;
+    fetching.current = true;
     setError(null);
     try {
-      const [nwsRes, txdotRes] = await Promise.allSettled([
-        fetch("/api/alerts"),
-        fetch("/api/road-conditions"),
+      const [nwsRes, txdotRes, communityRes] = await Promise.allSettled([
+        fetchHazards("/api/alerts", normalizeNwsAlert),
+        fetchHazards("/api/road-conditions", normalizeTxDotRoad),
+        fetchHazards("/api/community-reports", normalizeCommunityReport),
       ]);
 
       const loadedHazards: UnifiedHazard[] = [];
+      const warnings: string[] = [];
 
-      if (nwsRes.status === "fulfilled" && nwsRes.value.ok) {
-        const nwsData = (await nwsRes.value.json()) as { features?: NwsFeature[] };
-        if (Array.isArray(nwsData.features)) {
-          nwsData.features.forEach((feat) => {
-            loadedHazards.push(normalizeNwsAlert(feat));
-          });
+      for (const [label, result] of [
+        ["Weather alerts", nwsRes],
+        ["Road conditions", txdotRes],
+        ["Community submissions", communityRes],
+      ] as const) {
+        if (result.status === "rejected") {
+          warnings.push(`${label} are unavailable.`);
+          continue;
         }
-      }
-
-      if (txdotRes.status === "fulfilled" && txdotRes.value.ok) {
-        const txdotData = (await txdotRes.value.json()) as { features?: TxDotFeature[] };
-        if (Array.isArray(txdotData.features)) {
-          txdotData.features.forEach((feat, idx) => {
-            loadedHazards.push(normalizeTxDotRoad(feat, idx));
-          });
+        loadedHazards.push(...result.value.hazards);
+        if (result.value.stale) {
+          warnings.push(`${label} have not refreshed in over 30 minutes.`);
         }
       }
 
       setHazards(loadedHazards);
+      setSelectedHazard((current) => {
+        if (!current) return null;
+        if (current.source === "osm" || current.source === "bluesky") {
+          return current;
+        }
+        return loadedHazards.find((hazard) => hazard.id === current.id) ?? null;
+      });
+      setError(warnings.length ? warnings.join(" ") : null);
     } catch (err) {
       console.error("Telemetry fetch error:", err);
-      setError("We could not load the latest map information. Please try again.");
+      setError(
+        "We could not load the latest map information. Please try again.",
+      );
     } finally {
+      fetching.current = false;
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
+  const fetchEmergencyResources = useCallback(
+    async (
+      targetCenter: [number, number],
+      targetZoom: number,
+      signal?: AbortSignal,
+    ) => {
+      const osmTypes = getActiveOsmTypesForGroups(activeResourceGroups);
+      if (osmTypes.length === 0) {
+        setVerifiedResources([]);
+        setResourcesLoading(false);
+        return;
+      }
+
+      setResourcesLoading(true);
+      setResourcesError(null);
+
+      try {
+        const radiusMeters = computeRadiusMetersForZoom(targetZoom);
+        const params = new URLSearchParams({
+          lat: targetCenter[1].toFixed(4),
+          lng: targetCenter[0].toFixed(4),
+          radiusMeters: String(radiusMeters),
+          types: osmTypes.join(","),
+          includeUnnamed: String(includeUnnamedResources),
+          limit: "250",
+        });
+
+        if (debouncedSearchQuery) {
+          params.set("q", debouncedSearchQuery);
+        }
+
+        const res = await fetch(
+          `/api/emergency-resources?${params.toString()}`,
+          { signal },
+        );
+        const data = (await res.json()) as {
+          resources?: EmergencyResource[];
+          error?: string;
+        };
+
+        if (!res.ok) {
+          throw new Error(
+            data.error || "Could not load nearby emergency resources",
+          );
+        }
+
+        setVerifiedResources(data.resources ?? []);
+        setLastQueriedCenter(targetCenter);
+      } catch (err: unknown) {
+        if (signal?.aborted) return;
+        console.error("Emergency resources fetch error:", err);
+        setResourcesError(
+          err instanceof Error
+            ? err.message
+            : "Could not load local emergency resources.",
+        );
+      } finally {
+        if (!signal?.aborted) {
+          setResourcesLoading(false);
+        }
+      }
+    },
+    [activeResourceGroups, debouncedSearchQuery, includeUnnamedResources],
+  );
+
   useEffect(() => {
     queueMicrotask(() => {
       void fetchTelemetry();
     });
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void fetchTelemetry();
+    }, 60_000);
+    return () => window.clearInterval(timer);
   }, [fetchTelemetry]);
 
   const moveToSelectedLocation = useCallback(() => {
@@ -162,6 +333,83 @@ export default function CrisisMap() {
   useEffect(() => {
     moveToSelectedLocation();
   }, [moveToSelectedLocation]);
+
+  // Fetch resources automatically when filters/search change or when panning (if no active search text)
+  const viewportCenterRef = useRef<[number, number]>(viewportCenter);
+  const viewportZoomRef = useRef<number>(viewportZoom);
+  useEffect(() => {
+    viewportCenterRef.current = viewportCenter;
+    viewportZoomRef.current = viewportZoom;
+  }, [viewportCenter, viewportZoom]);
+
+  // 1. Re-fetch immediately when category chips, search query, or unnamed toggle changes
+  useEffect(() => {
+    if (location.loading) return;
+    if (viewportZoomRef.current < MIN_RESOURCE_ZOOM) return;
+
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      void fetchEmergencyResources(
+        viewportCenterRef.current,
+        viewportZoomRef.current,
+        controller.signal,
+      );
+    });
+    return () => controller.abort();
+  }, [fetchEmergencyResources, location.loading]);
+
+  // 2. When panning/zooming on the map: auto-fetch if no search query
+  useEffect(() => {
+    if (location.loading) return;
+    if (viewportZoom < MIN_RESOURCE_ZOOM) return;
+    if (debouncedSearchQuery) return;
+
+    const movedDistance = lastQueriedCenter
+      ? distanceMiles(lastQueriedCenter, viewportCenter)
+      : Infinity;
+
+    if (movedDistance < 1.2) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void fetchEmergencyResources(
+        viewportCenter,
+        viewportZoom,
+        controller.signal,
+      );
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    debouncedSearchQuery,
+    fetchEmergencyResources,
+    lastQueriedCenter,
+    location.loading,
+    viewportCenter,
+    viewportZoom,
+  ]);
+
+  const handleSearchCurrentArea = useCallback(() => {
+    void fetchEmergencyResources(viewportCenter, viewportZoom);
+  }, [fetchEmergencyResources, viewportCenter, viewportZoom]);
+
+  const handleMapMoveEnd = useCallback((evt: ViewStateChangeEvent) => {
+    const { longitude, latitude, zoom } = evt.viewState;
+    setPannedCenter([
+      Number(longitude.toFixed(4)),
+      Number(latitude.toFixed(4)),
+    ]);
+    setViewportZoom(Number(zoom.toFixed(2)));
+  }, []);
+
+  const ensureMapIcons = useCallback(() => {
+    const rawMap = mapRef.current?.getMap();
+    registerResourceIconsOnMap(rawMap);
+  }, []);
 
   const nwsGeoJson = useMemo(() => {
     return hazardsToGeoJson(hazards.filter((h) => h.source === "nws"));
@@ -185,54 +433,152 @@ export default function CrisisMap() {
   );
 
   const communityGeoJson = useMemo(
-    () => socialReportsToGeoJson(communityReports),
-    [communityReports],
+    () => ({ type: "FeatureCollection" as const, features: [
+      ...socialReportsToGeoJson(communityReports).features,
+      ...hazardsToGeoJson(hazards.filter((hazard) => hazard.source === "community")).features,
+    ] }),
+    [communityReports, hazards],
   );
-  const resourceGeoJson = useMemo(
-    () => socialReportsToGeoJson(resourceReports),
-    [resourceReports],
-  );
+
   const nearbyResourceReports = useMemo(
     () =>
       resourceReports.filter(
         (report) =>
-          distanceMiles([location.lng, location.lat], report.coordinates) <= 100,
+          distanceMiles(viewportCenter, report.coordinates) <= 100,
       ),
-    [location.lat, location.lng, resourceReports],
+    [resourceReports, viewportCenter],
   );
+
+  const showCommunityAidOnMap = useMemo(
+    () => activeResourceGroups.includes("community_aid"),
+    [activeResourceGroups],
+  );
+
+  const filteredCommunityAidForMap = useMemo(() => {
+    if (!showCommunityAidOnMap) return [];
+    if (!debouncedSearchQuery) return nearbyResourceReports;
+    const q = debouncedSearchQuery.toLowerCase();
+    return nearbyResourceReports.filter(
+      (r) =>
+        r.summary.toLowerCase().includes(q) ||
+        r.category.toLowerCase().includes(q) ||
+        (r.authorHandle?.toLowerCase().includes(q) ?? false),
+    );
+  }, [debouncedSearchQuery, nearbyResourceReports, showCommunityAidOnMap]);
+
+  const resourceGeoJson = useMemo(
+    () =>
+      combinedAidResourcesToGeoJson(
+        zoomedOutForResources ? [] : verifiedResources,
+        filteredCommunityAidForMap,
+      ),
+    [filteredCommunityAidForMap, verifiedResources, zoomedOutForResources],
+  );
+
+  const allHazardsAndResources = useMemo(() => {
+    const resourceHazards = verifiedResources.map(emergencyResourceToHazard);
+    const communityAidHazards = filteredCommunityAidForMap.map((r) =>
+      socialAidReportToHazard(r, viewportCenter),
+    );
+    return [...hazards, ...communityAidHazards, ...resourceHazards];
+  }, [filteredCommunityAidForMap, hazards, verifiedResources, viewportCenter]);
 
   const handleMapClick = (e: MapLayerMouseEvent) => {
     const feature = e.features?.[0];
-    if (feature && feature.properties) {
-      const clickedId = feature.properties.id || feature.id;
-      const match = hazards.find((h) => h.id === clickedId);
-      if (match) {
-        setActiveSection(null);
-        setSelectedHazard(match);
-      } else {
-        const isSocial = MOCK_SOCIAL_ALERTS.find((s) => s.id === clickedId);
-        if (isSocial) {
-          setActiveSection(null);
-          setSelectedHazard({
-            id: isSocial.id,
-            source: "bluesky",
-            externalId: isSocial.blueskyUri,
-            headline: isSocial.summary,
-            category: isSocial.category,
-            urgency: isSocial.urgency,
-            hasGeometry: true,
-            geometry: { type: "Point", coordinates: isSocial.coordinates },
-            createdAt: isSocial.createdAt,
+    if (feature) {
+      // 1. If user clicked a resource cluster bubble, smoothly zoom in to expand it
+      if (
+        feature.layer?.id === "aid-resource-clusters" &&
+        feature.properties?.cluster_id !== undefined
+      ) {
+        const clusterId = Number(feature.properties.cluster_id);
+        const coords: [number, number] =
+          feature.geometry.type === "Point"
+            ? (feature.geometry.coordinates as [number, number])
+            : [e.lngLat.lng, e.lngLat.lat];
+        const rawMap = mapRef.current?.getMap();
+        const source = rawMap?.getSource("aid-resources") as
+          | GeoJSONSource
+          | undefined;
+
+        if (source && typeof source.getClusterExpansionZoom === "function") {
+          void source
+            .getClusterExpansionZoom(clusterId)
+            .then((expansionZoom) => {
+              mapRef.current?.flyTo({
+                center: coords,
+                zoom: Math.min(expansionZoom, 15),
+                duration: 700,
+              });
+            })
+            .catch(() => {
+              mapRef.current?.flyTo({
+                center: coords,
+                zoom: Math.min(viewportZoom + 2.5, 14),
+                duration: 700,
+              });
+            });
+        } else {
+          mapRef.current?.flyTo({
+            center: coords,
+            zoom: Math.min(viewportZoom + 2.5, 14),
+            duration: 700,
           });
         }
+        return;
       }
-    } else {
-      setSelectedHazard(null);
-      setFromMap(e.lngLat.lat, e.lngLat.lng);
+
+      if (feature.properties) {
+        const clickedId = String(feature.properties.id || feature.id || "");
+
+        // 2. Check if clicked an OSM verified emergency resource
+        if (clickedId.startsWith("osm-")) {
+          const rawId = clickedId.slice(4);
+          const matchedResource = verifiedResources.find(
+            (r) => r.id === rawId,
+          );
+          if (matchedResource) {
+            setOpenedResourceFromPanel(activeSection === "resources");
+            setActiveSection(null);
+            setSelectedHazard(emergencyResourceToHazard(matchedResource));
+            return;
+          }
+        }
+
+        // 3. Check if clicked an NWS or TxDOT hazard
+        const match = hazards.find((h) => h.id === clickedId);
+        if (match) {
+          setOpenedResourceFromPanel(false);
+          setActiveSection(null);
+          setSelectedHazard(match);
+          return;
+        }
+
+        // 4. Check if clicked a community report / community aid point
+        const isSocial = MOCK_SOCIAL_ALERTS.find((s) => s.id === clickedId);
+        if (isSocial) {
+          const isAid = isAidResourceReport(isSocial);
+          setOpenedResourceFromPanel(isAid && activeSection === "resources");
+          setActiveSection(null);
+          setSelectedHazard(
+            isAid
+              ? socialAidReportToHazard(isSocial, viewportCenter)
+              : socialReportToHazard(isSocial),
+          );
+          return;
+        }
+      }
     }
+
+    setSelectedHazard(null);
+    setOpenedResourceFromPanel(false);
+    setFromMap(e.lngLat.lat, e.lngLat.lng);
   };
 
-  const flyToHazard = (hazard: UnifiedHazard) => {
+  const flyToHazard = (hazard: UnifiedHazard, fromResourcesPanel = false) => {
+    setOpenedResourceFromPanel(
+      fromResourcesPanel || activeSection === "resources",
+    );
     setActiveSection(null);
     setSelectedHazard(hazard);
 
@@ -246,9 +592,9 @@ export default function CrisisMap() {
         if (minX === maxX && minY === maxY) {
           mapRef.current?.flyTo({
             center: [minX, minY],
-            zoom: 12,
+            zoom: Math.max(viewportZoom, 13),
             bearing: 0,
-            duration: 1400,
+            duration: 1200,
           });
         } else {
           mapRef.current?.fitBounds(
@@ -260,7 +606,7 @@ export default function CrisisMap() {
               padding: 90,
               maxZoom: 13,
               bearing: 0,
-              duration: 1400,
+              duration: 1200,
             },
           );
         }
@@ -271,6 +617,8 @@ export default function CrisisMap() {
   };
 
   const resetToTexas = () => {
+    setPannedCenter([TEXAS_VIEWPORT.longitude, TEXAS_VIEWPORT.latitude]);
+    setViewportZoom(TEXAS_VIEWPORT.zoom);
     mapRef.current?.flyTo({
       center: [TEXAS_VIEWPORT.longitude, TEXAS_VIEWPORT.latitude],
       zoom: TEXAS_VIEWPORT.zoom,
@@ -281,8 +629,24 @@ export default function CrisisMap() {
   };
 
   const locateSocialReport = (report: SocialAlert) => {
-    flyToHazard(socialReportToHazard(report));
+    const isAid = isAidResourceReport(report);
+    flyToHazard(
+      isAid
+        ? socialAidReportToHazard(report, viewportCenter)
+        : socialReportToHazard(report),
+      isAid,
+    );
   };
+
+  const locateVerifiedResource = (resource: EmergencyResource) => {
+    flyToHazard(emergencyResourceToHazard(resource), true);
+  };
+
+  const toggleResourceGroup = useCallback((group: ResourceGroupKey) => {
+    setActiveResourceGroups((prev) =>
+      prev.includes(group) ? prev.filter((g) => g !== group) : [...prev, group],
+    );
+  }, []);
 
   const closeInformationPanel = useCallback(() => {
     setActiveSection(null);
@@ -292,38 +656,96 @@ export default function CrisisMap() {
     <div
       ref={containerRef}
       className="flex min-h-screen w-full flex-col bg-background text-foreground"
+      data-map-loaded={isMapReady ? "true" : "false"}
     >
       <SupportHeader />
 
-      <section aria-label="Disaster information map" className="relative h-[calc(100svh-4rem)] min-h-[34rem] w-full overflow-hidden bg-muted">
+      <section
+        aria-label="Disaster information map"
+        className="relative h-[calc(100svh-4rem)] min-h-[34rem] w-full overflow-hidden bg-muted"
+      >
         {/* Modular Top Floating Dock */}
         <MapControls
-          refreshing={refreshing}
+          refreshing={refreshing || resourcesLoading}
           onRefresh={() => {
             setRefreshing(true);
-            fetchTelemetry();
+            void fetchTelemetry();
+            if (!zoomedOutForResources) {
+              void fetchEmergencyResources(viewportCenter, viewportZoom);
+            }
           }}
           onResetView={resetToTexas}
         />
 
         <CompactWeatherOverlay
-          locationLabel={location.loading ? "Finding your location…" : location.city}
+          locationLabel={
+            location.loading ? "Finding your location…" : location.city
+          }
           data={weather.data}
           loading={location.loading || weather.loading}
           error={weather.error}
         />
 
+        {/* Floating "Search this area" or "Zoom in to load local resources" Pill */}
+        {layerVisibility.resources && zoomedOutForResources ? (
+          <div className="pointer-events-auto absolute left-1/2 top-16 z-10 -translate-x-1/2 sm:top-4">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                mapRef.current?.flyTo({
+                  center: viewportCenter,
+                  zoom: 9.5,
+                  duration: 900,
+                });
+              }}
+              className="h-9 gap-1.5 rounded-full bg-background/90 px-4 text-xs font-medium shadow-lg ring-1 ring-black/10 backdrop-blur-xl hover:bg-background dark:ring-white/15"
+            >
+              <ZoomIn className="size-3.5 text-primary" aria-hidden="true" />
+              Zoom in to load local aid resources
+            </Button>
+          </div>
+        ) : (
+          layerVisibility.resources &&
+          hasPendingAreaSearch && (
+            <div className="pointer-events-auto absolute left-1/2 top-16 z-10 -translate-x-1/2 sm:top-4">
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={handleSearchCurrentArea}
+                disabled={resourcesLoading}
+                className="h-9 gap-1.5 rounded-full px-4 text-xs font-medium shadow-xl"
+              >
+                {resourcesLoading ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Search className="size-3.5" aria-hidden="true" />
+                )}
+                Search this area
+              </Button>
+            </div>
+          )
+        )}
+
         <LayerControlDock
           activeSection={activeSection}
           onSelect={(section) => {
             setSelectedHazard(null);
-            setActiveSection((current) => current === section ? null : section);
+            setOpenedResourceFromPanel(false);
+            setActiveSection((current) =>
+              current === section ? null : section,
+            );
           }}
         />
 
         <Link
           href="/report"
-          className={cn(buttonVariants(), "absolute bottom-24 right-3 z-10 min-h-12 gap-2 rounded-full px-5 shadow-xl sm:bottom-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2")}
+          className={cn(
+            buttonVariants(),
+            "absolute bottom-24 right-3 z-10 min-h-12 gap-2 rounded-full px-5 shadow-xl sm:bottom-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2",
+          )}
         >
           <TriangleAlert aria-hidden="true" />
           Report
@@ -343,7 +765,10 @@ export default function CrisisMap() {
 
         {/* Error Notification */}
         {error && (
-          <div role="alert" className="absolute left-3 right-3 top-16 z-30 flex items-center gap-2 rounded-xl border border-destructive/30 bg-card p-3 text-sm text-destructive shadow-lg sm:left-auto sm:right-4 sm:max-w-sm">
+          <div
+            role="alert"
+            className="absolute left-3 right-3 top-16 z-30 flex items-center gap-2 rounded-xl border border-destructive/30 bg-card p-3 text-sm text-destructive shadow-lg sm:left-auto sm:right-4 sm:max-w-sm"
+          >
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -354,7 +779,14 @@ export default function CrisisMap() {
           ref={mapRef}
           initialViewState={TEXAS_VIEWPORT}
           mapStyle={mapStyle}
-          onLoad={moveToSelectedLocation}
+          onLoad={() => {
+            ensureMapIcons();
+            moveToSelectedLocation();
+            setIsMapReady(true);
+          }}
+          onStyleData={ensureMapIcons}
+          onMoveEnd={handleMapMoveEnd}
+          onError={(e) => console.error("Map error event:", e)}
           maxPitch={0}
           minPitch={0}
           pitchWithRotate={false}
@@ -362,7 +794,9 @@ export default function CrisisMap() {
             ...(layerVisibility.nws ? ["nws-hazard-fill"] : []),
             ...(layerVisibility.txdot ? ["txdot-road-line"] : []),
             ...(layerVisibility.social ? ["social-alerts-points"] : []),
-            ...(layerVisibility.resources ? ["aid-resource-points"] : []),
+            ...(layerVisibility.resources
+              ? ["aid-resource-clusters", "aid-resource-points"]
+              : []),
           ]}
           onClick={handleMapClick}
           cursor={selectedHazard ? "pointer" : "grab"}
@@ -386,11 +820,21 @@ export default function CrisisMap() {
             </Source>
           )}
 
-          {layerVisibility.resources && resourceGeoJson.features.length > 0 && (
-            <Source id="aid-resources" type="geojson" data={resourceGeoJson}>
-              <Layer {...aidResourcesPointLayer} />
-            </Source>
-          )}
+          {layerVisibility.resources &&
+            resourceGeoJson.features.length > 0 && (
+              <Source
+                id="aid-resources"
+                type="geojson"
+                data={resourceGeoJson}
+                cluster={true}
+                clusterMaxZoom={13}
+                clusterRadius={42}
+              >
+                <Layer {...aidResourcesClusterLayer} />
+                <Layer {...aidResourcesClusterCountLayer} />
+                <Layer {...aidResourcesPointLayer} />
+              </Source>
+            )}
 
           {!location.loading && (
             <Marker
@@ -409,12 +853,20 @@ export default function CrisisMap() {
           )}
         </Map>
 
-        {/* Slide-out Hazard Inspection Drawer */}
+        {/* Slide-out Hazard & Resource Inspection Drawer */}
         <HazardDrawer
           hazard={selectedHazard}
           socialAlerts={MOCK_SOCIAL_ALERTS}
-          onClose={() => setSelectedHazard(null)}
-          onLocate={flyToHazard}
+          onClose={() => {
+            setSelectedHazard(null);
+            setOpenedResourceFromPanel(false);
+          }}
+          onLocate={(h) => flyToHazard(h, openedResourceFromPanel)}
+          onBackToResources={() => {
+            setSelectedHazard(null);
+            setOpenedResourceFromPanel(false);
+            setActiveSection("resources");
+          }}
         />
 
         <MapInformationPanel
@@ -425,6 +877,14 @@ export default function CrisisMap() {
           hazards={hazards}
           communityReports={MOCK_SOCIAL_ALERTS}
           resourceReports={nearbyResourceReports}
+          verifiedResources={verifiedResources}
+          resourcesLoading={resourcesLoading}
+          resourcesError={resourcesError}
+          zoomedOutForResources={zoomedOutForResources}
+          activeResourceGroups={activeResourceGroups}
+          resourceSearchQuery={resourceSearchQuery}
+          includeUnnamedResources={includeUnnamedResources}
+          hasPendingAreaSearch={hasPendingAreaSearch}
           mapDataLoading={loading}
           onClose={closeInformationPanel}
           onToggleLayer={(layerKey) =>
@@ -433,8 +893,15 @@ export default function CrisisMap() {
               [layerKey]: !previous[layerKey],
             }))
           }
-          onLocateHazard={flyToHazard}
+          onToggleResourceGroup={toggleResourceGroup}
+          onResourceSearchChange={setResourceSearchQuery}
+          onToggleIncludeUnnamed={() =>
+            setIncludeUnnamedResources((prev) => !prev)
+          }
+          onSearchCurrentArea={handleSearchCurrentArea}
+          onLocateHazard={(h) => flyToHazard(h, false)}
           onLocateReport={locateSocialReport}
+          onLocateVerifiedResource={locateVerifiedResource}
         />
       </section>
 
@@ -447,15 +914,19 @@ export default function CrisisMap() {
                 Detailed source records and map data for developers
               </span>
             </span>
-            <span className="text-sm font-normal text-muted-foreground group-open:hidden">Show</span>
-            <span className="hidden text-sm font-normal text-muted-foreground group-open:inline">Hide</span>
+            <span className="text-sm font-normal text-muted-foreground group-open:hidden">
+              Show
+            </span>
+            <span className="hidden text-sm font-normal text-muted-foreground group-open:inline">
+              Hide
+            </span>
           </summary>
 
           <AlertFeedTable
-            hazards={hazards}
+            hazards={allHazardsAndResources}
             selectedHazardId={selectedHazard?.id}
             onSelectHazard={(h) => setSelectedHazard(h)}
-            onLocate={flyToHazard}
+            onLocate={(h) => flyToHazard(h, false)}
           />
         </details>
       </main>
@@ -484,6 +955,48 @@ function socialReportsToGeoJson(reports: SocialAlert[]) {
   };
 }
 
+function combinedAidResourcesToGeoJson(
+  verifiedResources: EmergencyResource[],
+  communityAidReports: SocialAlert[],
+) {
+  const verifiedFeatures = verifiedResources.map((res) => ({
+    type: "Feature" as const,
+    id: `osm-${res.id}`,
+    geometry: {
+      type: "Point" as const,
+      coordinates: res.coordinates,
+    },
+    properties: {
+      id: `osm-${res.id}`,
+      name: res.name,
+      group: res.group,
+      resourceType: res.resourceType,
+      verified: true,
+    },
+  }));
+
+  const communityFeatures = communityAidReports.map((post) => ({
+    type: "Feature" as const,
+    id: post.id,
+    geometry: {
+      type: "Point" as const,
+      coordinates: post.coordinates,
+    },
+    properties: {
+      id: post.id,
+      name: post.summary,
+      group: "community_aid" as const,
+      resourceType: post.category,
+      verified: false,
+    },
+  }));
+
+  return {
+    type: "FeatureCollection" as const,
+    features: [...communityFeatures, ...verifiedFeatures],
+  };
+}
+
 function socialReportToHazard(report: SocialAlert): UnifiedHazard {
   return {
     id: report.id,
@@ -495,5 +1008,6 @@ function socialReportToHazard(report: SocialAlert): UnifiedHazard {
     hasGeometry: true,
     geometry: { type: "Point", coordinates: report.coordinates },
     createdAt: report.createdAt,
+    sourceClassification: report.sourceClassification,
   };
 }

@@ -1,0 +1,45 @@
+name: Deploy Workers to Azure VM
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'workers/**'
+      - '.github/workflows/deploy-vm.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Update VM and Restart Workers
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into Azure VM and deploy updates
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            set -e
+            echo "Navigating to repository..."
+            cd ~/Senior-Project
+
+            echo "Pulling latest code from main..."
+            git pull origin main
+
+            echo "Updating Python dependencies if needed..."
+            workers/official/.venv/bin/pip install -q -r workers/official/requirements.txt
+            workers/bluesky/.venv/bin/pip install -q -r workers/bluesky/requirements.txt
+
+            echo "Restarting Bluesky daemon..."
+            sudo systemctl restart bluesky-worker
+
+            echo "Verifying worker status..."
+            sudo systemctl is-active --quiet bluesky-worker && echo "Bluesky worker is active and running!"
+
+            echo "Running official telemetry health check..."
+            workers/official/.venv/bin/python workers/official/worker.py --check
+
+            echo "Deployment completed successfully!"
+

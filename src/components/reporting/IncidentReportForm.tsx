@@ -12,10 +12,10 @@ import {
   type IncidentReportDraft,
   type IncidentReportErrors,
   type IncidentReportField,
-  type IncidentReportPayload,
   type ReportLocationStatus,
   validateIncidentReport,
 } from "@/lib/report-validation"
+import { isTexasLocation } from "@/lib/community-report-validation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -52,6 +52,7 @@ export function IncidentReportForm() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [statusMessage, setStatusMessage] = useState("")
   const submissionLock = useRef(false)
+  const submissionId = useRef<string | null>(null)
 
   useEffect(() => {
     if (location.loading) return
@@ -89,6 +90,7 @@ export function IncidentReportForm() {
       return next
     })
     setStatusMessage("")
+    submissionId.current = null
   }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -103,22 +105,38 @@ export function IncidentReportForm() {
       focusFirstInvalidField(result.errors)
       return
     }
+    if (!isTexasLocation(result.data.longitude, result.data.latitude)) {
+      const locationErrors = { latitude: "Choose a location within Texas.", longitude: "Choose a location within Texas." }
+      setErrors(locationErrors)
+      focusFirstInvalidField(locationErrors)
+      return
+    }
 
     setErrors({})
     submissionLock.current = true
     setIsSubmitting(true)
 
-    const payload: IncidentReportPayload = {
-      ...result.data,
-      locationSource: location.source,
-      locationStatus,
-    }
-
     try {
-      await submitIncidentReport(payload)
+      submissionId.current ??= crypto.randomUUID()
+      const response = await fetch("/api/community-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: draft.category, severity: draft.severity,
+          description: result.data.description, latitude: result.data.latitude,
+          longitude: result.data.longitude, locationSource: location.source,
+          locationStatus, submissionId: submissionId.current,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      })
+      const receipt = await response.json()
+      if (!response.ok) throw new Error(receipt.error || "We could not save your report. Please try again.")
       setStatusMessage(
-        "Report validated. Backend submission will be enabled when the FastAPI endpoint is available."
+        `Report received (${receipt.id}). It will appear publicly only after moderator approval.`
       )
+    } catch (error) {
+      setStatusMessage(error instanceof Error && error.name !== "TimeoutError"
+        ? error.message : "Submission timed out. Please retry; your report will not be duplicated.")
     } finally {
       submissionLock.current = false
       setIsSubmitting(false)
@@ -137,7 +155,7 @@ export function IncidentReportForm() {
             <CardTitle>Incident details</CardTitle>
             <CardDescription>
               Share current natural-disaster or relief information. All fields are
-              required.
+              required. Reports are reviewed before they appear publicly. Avoid personal contact details.
             </CardDescription>
           </div>
           <Badge variant="outline" className="min-h-6 gap-1.5 px-2.5">
@@ -148,6 +166,7 @@ export function IncidentReportForm() {
       </CardHeader>
 
       <form noValidate onSubmit={handleSubmit}>
+        <fieldset disabled={isSubmitting} className="contents">
         <CardContent className="gap-5">
           {errorEntries.length > 0 && (
             <div
@@ -320,16 +339,17 @@ export function IncidentReportForm() {
             {isSubmitting ? (
               <>
                 <Loader2 className="animate-spin" aria-hidden="true" />
-                Validating report…
+                Submitting report…
               </>
             ) : (
               <>
                 <Send aria-hidden="true" />
-                Validate report
+                Submit report
               </>
             )}
           </Button>
         </CardFooter>
+        </fieldset>
       </form>
     </Card>
   )
@@ -369,11 +389,4 @@ function focusFirstInvalidField(errors: IncidentReportErrors) {
   requestAnimationFrame(() => {
     document.getElementById(firstInvalidField)?.focus()
   })
-}
-
-async function submitIncidentReport(_payload: IncidentReportPayload): Promise<void> {
-  // Integration seam: replace this resolved promise with a fetch to the FastAPI
-  // report endpoint after its URL and request/response contract are finalized.
-  void _payload
-  await Promise.resolve()
 }
