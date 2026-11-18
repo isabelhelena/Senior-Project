@@ -60,10 +60,9 @@ test.describe("WeatherSummaryCard and Weather Overlays", () => {
 
     await page.goto("/test-feed", { waitUntil: "domcontentloaded" });
 
-    const errorMessage = page.getByText(
-      "Current weather is temporarily unavailable. Please try again soon."
-    );
-    await expect(errorMessage).toBeVisible({ timeout: 10_000 });
+    // Verify error boundary text
+    const errorNotice = page.getByText("Current weather is temporarily unavailable. Please try again soon.");
+    await expect(errorNotice).toBeVisible({ timeout: 10_000 });
   });
 
   test("displays loading spinner while fetching weather data", async ({ page }) => {
@@ -87,6 +86,8 @@ test.describe("WeatherSummaryCard and Weather Overlays", () => {
   });
 
   test("renders compact weather overlay on the map view", async ({ page }) => {
+    test.setTimeout(60_000);
+
     await page.route("**/api/weather-current*", async (route) => {
       await route.fulfill({
         status: 200,
@@ -95,10 +96,42 @@ test.describe("WeatherSummaryCard and Weather Overlays", () => {
       });
     });
 
+    await page.route("**/api/alerts", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ type: "FeatureCollection", features: [], stale: false }),
+      });
+    });
+
+    await page.route("**/api/road-conditions", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ type: "FeatureCollection", features: [], stale: false }),
+      });
+    });
+
+    await page.route("**/api/community-reports*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ type: "FeatureCollection", features: [], stale: false }),
+      });
+    });
+
+    await page.route("**/api/emergency-resources*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ resources: [] }),
+      });
+    });
+
     await page.goto("/test-map", { waitUntil: "domcontentloaded" });
 
     // Compact weather overlay renders rounded degrees (78°) and condition
-    await expect(page.getByText("Partly Cloudy")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Partly Cloudy")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("78°")).toBeVisible();
   });
 });

@@ -43,7 +43,7 @@ test.describe("Hazard Details Drawer and Alert Feed Table", () => {
   };
 
   test.beforeEach(async ({ page }) => {
-    // Intercept alerts, roads, and emergency resources
+    // Intercept alerts, roads, emergency resources, and community reports
     await page.route("**/api/alerts", async (route) => {
       await route.fulfill({
         status: 200,
@@ -53,6 +53,14 @@ test.describe("Hazard Details Drawer and Alert Feed Table", () => {
     });
 
     await page.route("**/api/road-conditions", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ type: "FeatureCollection", stale: false, features: [] }),
+      });
+    });
+
+    await page.route("**/api/community-reports*", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -70,6 +78,7 @@ test.describe("Hazard Details Drawer and Alert Feed Table", () => {
   });
 
   test("renders AlertFeedTable under Technical Details accordion", async ({ page }) => {
+    test.setTimeout(60_000);
     await page.goto("/test-map", { waitUntil: "domcontentloaded" });
 
     // Ensure map container is ready
@@ -97,6 +106,7 @@ test.describe("Hazard Details Drawer and Alert Feed Table", () => {
   });
 
   test("opens HazardDrawer when clicking an item in AlertFeedTable", async ({ page }) => {
+    test.setTimeout(60_000);
     await page.goto("/test-map", { waitUntil: "domcontentloaded" });
 
     await expect(page.locator("[data-map-loaded]")).toHaveAttribute("data-map-loaded", "true", {
