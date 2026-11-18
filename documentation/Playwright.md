@@ -59,40 +59,29 @@ npx playwright test --project=chromium
 # Firefox only
 npx playwright test --project=firefox
 
-# WebKit (Safari) only
+# WebKit (Safari engine) only
 npx playwright test --project=webkit
 ```
 
-### Run a Specific Test File
+### Run a Single Test File
 ```bash
-npx playwright test tests/map.spec.ts
+npx playwright test tests/incident-report.spec.ts --project=chromium
 ```
 
-### Interactive Test Dashboard (UI Mode)
-Recommended for step-by-step debugging, time-travel inspection, and watching DOM state:
+### Interactive UI Mode
+Playwright UI Mode allows you to step through assertions, view DOM snapshots, and inspect network requests in real time:
 ```bash
 npm run test:e2e:ui
 ```
 
-### Run in Headed Mode (Watch Browser Windows)
-```bash
-npx playwright test --headed
-```
-
-### View Test Reports
-The test runner is configured with `{ open: 'never' }` so that automated runs do not block the terminal. To open the generated HTML report:
-```bash
-npx playwright show-report
-```
-
 ---
 
-## 🗺️ How MapLibre & WebGL Testing Works
+## ⚙️ CI/CD & Headless WebGL Configuration
 
-The `/test-map` route utilizes **MapLibre GL JS**, which requires a WebGL context to parse vector tiles and trigger map events.
+The CI pipeline runs automated checks on push and pull requests via GitHub Actions in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
-### 1. Headless WebGL Software Rendering
-In `playwright.config.ts`, Chromium is launched with SwiftShader software rasterization flags:
+### SwiftShader CPU Software Rasterization
+Playwright tests interact with live hardware-accelerated MapLibre GL canvases. Because Linux CI agents (e.g. `ubuntu-latest`) lack dedicated GPUs, `playwright.config.ts` passes Google's SwiftShader CPU rendering flags directly to Chromium:
 ```ts
 launchOptions: {
   args: [
@@ -103,20 +92,23 @@ launchOptions: {
   ],
 }
 ```
-This enables MapLibre to acquire a WebGL context even in CI environments, virtual machines, or systems without a dedicated GPU.
 
-### 2. Geolocation Mocking
-Tests mock browser geolocation permissions and coordinates (defaulting to San Antonio, TX) via Playwright's `test.use()`:
+### WebServer Configuration in CI
+In continuous integration environments (`CI=true`):
+- `playwright.config.ts` runs an optimized production build (`node node_modules/next/dist/bin/next build && node node_modules/next/dist/bin/next start`) to ensure fast, deterministic page serving.
+- `reporter: [['list'], ['html', { open: 'never' }]]` prevents non-interactive terminal hanging.
+- If an E2E test fails in GitHub Actions, test traces, videos, and HTML reports are uploaded as downloadable artifacts for 7 days.
+
+---
+
+## 🔍 Best Practices for Map & Telemetry Testing
+
+1. **Avoid Hardcoded Port URLs:**
+   Use relative path navigation (e.g. `await page.goto("/test-map")`) so requests automatically resolve to Playwright's `baseURL` (`http://127.0.0.1:3000`).
+
+2. **Wait for MapLibre Canvas Mount:**
+   The map component sets a `data-map-loaded="true"` attribute on its outer container once style loading and initial layer attachment complete:
 ```ts
-test.use({
-  geolocation: { latitude: 29.3388, longitude: -98.5362 },
-  permissions: ["geolocation"],
-});
-```
-
-### 3. Map Readiness State
-The `CrisisMap` component exposes a `data-map-loaded` attribute on its container element. It initializes to `"false"` and updates to `"true"` inside MapLibre's `onLoad` callback:
-```typescript
 // 1. Ensure the canvas element is attached to DOM
 await expect(page.locator(".maplibregl-canvas")).toBeAttached({ timeout: 20_000 });
 
