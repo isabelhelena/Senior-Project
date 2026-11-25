@@ -1,228 +1,49 @@
-# Lone Star Crisis Map (`/test-map`)
+# Crisis Map (`/test-map`)
 
-An interactive, high-performance WebGL crisis map and telemetry inspector for **Lone Star Support**, built using Next.js App Router, MapLibre GL, and Tailwind CSS / shadcn/ui.
+Interactive MapLibre GL map and telemetry inspector built with Next.js App Router, `react-map-gl/maplibre`, Tailwind CSS, and shadcn/ui.
 
-> [!NOTE]
-> **Status: In Progress (Phases 1–3 Complete, Phase 4 In Progress)**  
-> This interface represents the active development of Milestone 3 from [ROADMAP.md](../../../ROADMAP.md). It displays live authoritative hazard telemetry (NWS weather polygons and TxDOT road closures) alongside community social reports.
+## Data layers and sources
 
----
+| Map feature / panel | Source | Details |
+| --- | --- | --- |
+| **Weather polygons & advisories** | `GET /api/alerts` | Stored statewide NWS GeoJSON from Supabase `public_alerts`. Missing polygons are resolved into county/marine zone boundaries by `workers/official/worker.py`; `hazardsToGeoJson` preserves null-geometry bulletins in the panel and table. |
+| **Road conditions** | `GET /api/road-conditions` | Stored statewide TxDOT Roadway Status linestrings from Supabase `public_alerts`, excluding open-to-traffic, artificial-centerline, and proposed segments. |
+| **Emergency resources (OSM)** | `GET /api/emergency-resources` | PostGIS nearest-neighbor query (`get_nearby_emergency_resources`) loaded automatically at zoom `>= 8`, clustered in WebGL with 5 procedural canvas badge icons (`shelters`, `food_water`, `medical`, `responders`, `community_aid`) and an unnamed water-tap/shelter toggle. |
+| **Reviewed community reports** | `GET /api/community-reports` | Moderator-approved, unexpired citizen submissions from `/report`. Rendered on the map (`social-alerts-points`) and under **Reviewed submissions** in the Community panel. |
+| **Bluesky demo fixtures** | `src/app/test-map/data/mockSocialAlerts.ts` | Static `MOCK_SOCIAL_ALERTS` fixtures passed through `normalizeSocialAlert`. Displayed under **Bluesky demo reports**, as **Community Aid** items in Shelters & Aid, and inside `HazardDrawer`'s Community tab (`@turf/boolean-point-in-polygon`). |
+| **Ambient weather & geocoding** | `GET /api/weather-current`, `GET /api/geocode` | Current NWS station observations for the selected GPS, ZIP, or clicked map location. |
 
-## 1. Overview & Architectural Role
+## Component layout
 
-The Crisis Map acts as the operational geospatial presentation layer of Lone Star Support. It decouples client-side visualization from data collection by strictly adhering to a **Unified Hazard Contract** mapped to the project's PostgreSQL database schema in [schema.sql](../../../schema.sql).
-
-```mermaid
-flowchart TD
-    subgraph Sources["Upstream Telemetry Sources"]
-        NWS["NWS Weather Alerts API"]
-        TxDOT["TxDOT ArcGIS REST Server"]
-        Bluesky["Bluesky AT Protocol Firehose"]
-        OSM["OpenStreetMap Extracts"]
-    end
-
-    subgraph Workers["Python Background Workers (OSM Planned)"]
-        W_NWS["NWS Ingestion Worker"]
-        W_TxDOT["TxDOT Road Worker"]
-        W_BSKY["Bluesky Worker (Gemini + Photon)"]
-        W_OSM["OSM Resource Ingestion"]
-    end
-
-    subgraph DB["Supabase PostGIS Database (schema.sql)"]
-        T_Alerts[("public_alerts (Weather & Road Hazards)")]
-        T_Social[("social_alerts (Geotagged Citizen Reports)")]
-        T_Resources[("emergency_resources (Shelters & POIs)")]
-    end
-
-    subgraph Frontend["Next.js Presentation Layer (/test-map)"]
-        Normalizer["Data Normalizers (normalizers.ts)"]
-        MapEngine["MapLibre WebGL Engine (Map.tsx)"]
-        Drawer["Inspection Drawer (HazardDrawer.tsx)"]
-        Table["Telemetry Inspector (AlertFeedTable.tsx)"]
-        Controls["MapControls & Layer Docks"]
-    end
-
-    %% Current storage-backed routes
-    T_Alerts -->|"/api/alerts and /api/road-conditions"| Normalizer
-
-    %% Target Unified Worker Pipeline
-    NWS --> W_NWS
-    TxDOT --> W_TxDOT
-    Bluesky --> W_BSKY
-    OSM --> W_OSM
-
-    W_NWS --> T_Alerts
-    W_TxDOT --> T_Alerts
-    W_BSKY --> T_Social
-    W_OSM --> T_Resources
-
-    DB -.->|"Planned unified query (/api/hazards)"| Normalizer
-
-    Normalizer --> MapEngine
-    Normalizer --> Table
-    MapEngine <--> Drawer
-    MapEngine <--> Table
-    Controls --> MapEngine
-```
-
-Official records now come from Supabase `public_alerts` through the existing Next.js routes. Their GeoJSON contract remains compatible with the frontend normalizers. Live social and resource integration is still planned.
-
----
-
-## 2. Current Implementation Status
-
-| Feature / Capability            | Status                  | Implementation Details                                                                                                                       |
-| :------------------------------ | :---------------------- | :------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Vector Basemap**              | Complete                | Clean CARTO Positron (Light) & Dark Matter vector styles dynamically synced with system/app theme. Zero API keys.                            |
-| **Tilt Locking**                | Complete                | Camera pitch is locked to 0° (`maxPitch: 0`, `pitchWithRotate: false`) for an orthographic, top-down 2D view.                                |
-| **North / Texas Reset**         | Complete                | Floating compass button smoothly resets viewport center, zoom, bearing (`0°`), and pitch (`0°`).                                             |
-| **NWS Weather Warnings**        | Complete                | Stored GeoJSON from `/api/alerts`. Polygons rendered via WebGL with data-driven severity styling (Critical, Severe, Medium).                   |
-| **TxDOT Road Closures**         | Complete                | Stored GeoJSON from `/api/road-conditions`. Rendered as high-visibility dashed linestrings.                                                    |
-| **Null-Geometry Preservation**  | Complete                | The worker resolves missing NWS geometry from affected-zone boundaries; the frontend also retains its null-geometry fallback. |
-| **Slide-Out Inspection Drawer** | Complete                | Glassmorphic panel displaying official instructions, expiration countdown timers, affected areas, and descriptions.                          |
-| **Community Chatter (Spatial)** | Complete (Prototyping)  | Tab in the drawer uses `@turf/boolean-point-in-polygon` to spatially filter social reports inside the clicked hazard polygon.                |
-| **Telemetry Feed Inspector**    | Complete                | Full-width filterable table below the map with search, count badges, and **Click-to-Fly** navigation.                                        |
-| **OSM Emergency Resources**     | Complete                | Live PostGIS query via `/api/emergency-resources` (`get_nearby_emergency_resources`), clustered WebGL icons, 5 category chips, and search.   |
-| **Live Supabase Social Feed**   | _In Progress (Phase 4)_ | Currently using realistic test fixtures in `data/mockSocialAlerts.ts` until `/api/social-alerts` is connected to Supabase.                   |
-
----
-
-## 3. Component Architecture
-
-All UI components are modularized to ensure clarity, testability, and separation of concerns:
-
-```
+```text
 src/app/test-map/
-├── page.tsx                       # Dynamic SSR-disabled client entrypoint
-├── README.md                      # This documentation
+├── page.tsx                          # Client-only entrypoint (next/dynamic, ssr: false)
 ├── data/
-│   └── mockSocialAlerts.ts        # Phase 3 testing fixtures for Bluesky social alerts
+│   └── mockSocialAlerts.ts           # Static Bluesky fixture dataset
 └── components/
-    ├── Map.tsx                    # Core MapLibre controller, viewport, and telemetry loader
-    ├── MapControls.tsx            # Top floating dock: Brand badge, ThemeToggle, Refresh, North Reset
-    ├── LayerControlDock.tsx       # Bottom-left floating dock: Overlays toggles (NWS, TxDOT, Social)
-    ├── MapLayers.ts               # MapLibre WebGL data-driven paint & layout expressions
-    ├── HazardDrawer.tsx           # Slide-out inspection sheet with details & community chatter
-    └── AlertFeedTable.tsx         # Searchable, filterable telemetry inspector below the map
+    ├── Map.tsx                       # MapLibre state, data polling, resource auto-fetch, click handling
+    ├── SupportHeader.tsx             # Header with ZIP search and GPS reset
+    ├── CompactWeatherOverlay.tsx     # Top-left floating current weather pill
+    ├── MapControls.tsx               # Top-right theme toggle, refresh button, and "Show all of Texas" reset
+    ├── LayerControlDock.tsx          # Bottom-left dock (Weather, Roads, Shelters & Aid, Community)
+    ├── MapInformationPanel.tsx       # Slide-out panel for layer toggles, resource filters/search, and lists
+    ├── MapLayers.ts                  # MapLibre layer styles and canvas icon registration
+    ├── HazardDrawer.tsx              # Hazard details, Turf spatial chatter tab, and ResourceDetailDrawer
+    └── AlertFeedTable.tsx            # Filterable record cards inside the "Technical Details" accordion
 ```
 
-### Shared Supporting Layers
+## Key behaviors
 
-- **Types** ([src/types/hazard.ts](../../types/hazard.ts)): Defines `UnifiedHazard`, `DisasterCategory`, `UrgencyLevel`, and `SocialAlert` matching database enums (`disaster_category`, `urgency_level`).
-- **Normalizers** ([src/lib/normalizers.ts](../../lib/normalizers.ts)): Standardizes raw NWS and TxDOT feeds into `UnifiedHazard` instances and generates valid GeoJSON FeatureCollections for MapLibre.
-- **Theming** ([src/components/ThemeProvider.tsx](../../components/ThemeProvider.tsx)): Next.js App Router wrapper for `next-themes`, syncing Tailwind v4 variables with MapLibre style URLs.
+- **Orthographic 2D camera:** Tilt is locked (`maxPitch={0}`, `minPitch={0}`, `pitchWithRotate={false}`). The map button in `MapControls` (`Show all of Texas`) resets the camera to `[-99.9018, 31.5]`, zoom `6`, bearing `0`, pitch `0`.
+- **Visible-tab refresh:** `Map.tsx` reloads `/api/alerts`, `/api/road-conditions`, and `/api/community-reports` every 60 seconds while the tab is visible and surfaces stale-feed warnings (`> 30` minutes old).
+- **Theme-aware basemaps:** `next-themes` switches between CARTO Positron (light) and Dark Matter (dark) vector styles, re-registering procedural resource icons on `onStyleData`.
+- **Viewport resource loading:** When zoomed in (`zoom >= 8`), panning >= 1.2 miles auto-fetches nearby OSM facilities (or shows a **Search this area** pill when a search query is active).
 
----
+## Local usage
 
-## 4. Key Design Decisions & Safeguards
-
-### A. Handling NWS `geometry: null`
-
-NWS issues two classes of weather bulletins:
-
-1. Convective, radar-tracked storm warnings (Tornadoes, Severe Thunderstorms, Flash Floods) which carry `Polygon` or `MultiPolygon` geometries.
-2. Regional / county-wide watches and advisories (Flood Watches, Freeze Warnings, Heat Advisories) which often send `"geometry": null` in the raw GeoJSON, referencing county FIPS/UGC codes instead.
-
-**Current behavior:** The NWS worker resolves `affectedZones` into polygons before persistence, preserving the source in `properties.geometrySource`. Zone boundaries describe the affected area and are not radar-derived storm footprints. `hazardsToGeoJson()` still filters null geometries defensively, and the inspector can display text-only records.
-
-### B. Point-in-Polygon Community Chatter
-
-When a user clicks an active storm warning polygon on the map, the drawer's "Community" tab computes spatial containment using `@turf/boolean-point-in-polygon`:
-
-```typescript
-const nearbyPosts = socialAlerts.filter((post) =>
-  booleanPointInPolygon(post.coordinates, hazard.geometry),
-);
+```powershell
+npm ci
+npm run dev
 ```
 
-This fulfills the "Parent-Hazard" model: citizen reports and mutual aid requests from Bluesky are anchored directly to verified government emergency zones.
-
-### C. Orthographic 2D Camera
-
-To avoid disorienting users during an emergency, 3D tilt is strictly locked:
-
-```tsx
-<Map
-  maxPitch={0}
-  minPitch={0}
-  pitchWithRotate={false}
-  ...
-/>
-```
-
-Users can pan and zoom freely. If rotated, the **Compass button** in [MapControls.tsx](components/MapControls.tsx) resets both camera rotation (`bearing: 0`) and pitch (`pitch: 0`).
-
----
-
-## 5. Running the Interface Locally
-
-1. **Install dependencies:**
-
-   ```powershell
-   npm install
-   ```
-
-2. **Start the Next.js development server:**
-
-   ```powershell
-   npm run dev
-   ```
-
-3. **Open the map:**
-   Navigate to [http://localhost:3000/test-map](http://localhost:3000/test-map).
-
-### What to Verify:
-
-- **Theme Toggle:** Switch between Light and Dark mode; verify the vector basemap smoothly swaps between CARTO Positron and Dark Matter.
-- **Live Hazards:** Verify that active weather alerts in Texas render as semi-transparent polygons with colored borders (Red = Critical, Orange = Severe, Yellow = Medium).
-- **Inspection Drawer:** Click an alert on the map or click **"Locate on Map"** in the table below. Verify the camera frames the polygon and opens the drawer with instructions.
-- **Community Tab:** In the drawer, select the "Community" tab to inspect spatially matched social posts.
-
----
-
-## 6. Supabase ingestion status and remaining work
-
-NWS and TxDOT ingestion runs in local Python workers with opt-in ten-minute polling.
-`/api/alerts` and `/api/road-conditions` read persisted Supabase snapshots;
-the visible map rereads them every minute and warns on failed/stale feeds. Missing NWS
-polygons are resolved from affected-zone boundaries before storage. See
-[worker setup](../../../workers/official/README.md). Social integration,
-OSM imports, and unified bounding-box queries remain separate work.
-
-The architecture consolidates **data ingestion into Supabase PostGIS via standalone Python workers**. NWS and TxDOT now follow this path; the diagram also includes planned OSM and unified-query work:
-
-```mermaid
-flowchart LR
-    subgraph Ingestion["Standalone Python Workers"]
-        W1["NWS Worker"]
-        W2["TxDOT Worker"]
-        W3["Bluesky Worker"]
-        W4["OSM Worker"]
-    end
-
-    subgraph Supabase["Unified Supabase PostGIS Engine"]
-        PA[("public_alerts")]
-        SA[("social_alerts")]
-        ER[("emergency_resources")]
-    end
-
-    subgraph Presentation["Crisis Map Frontend"]
-        MapClient["Next.js /test-map"]
-    end
-
-    W1 -->|"Upsert GeoJSON"| PA
-    W2 -->|"Upsert LineStrings"| PA
-    W3 -->|"Upsert Geocoded Points"| SA
-    W4 -->|"Upsert Resource POIs"| ER
-
-    PA -->|"ST_Intersects / bbox"| MapClient
-    SA -->|"ST_Contains"| MapClient
-    ER -->|"Point Layers"| MapClient
-```
-
-### Why Consolidate All Ingestion in Supabase?
-
-1. **True Spatial Joins (`ST_Contains` / `ST_Intersects`):** PostGIS can execute a single query to find all citizen reports and closed highways _geographically inside_ a tornado warning polygon. Client-side spatial math works well for prototyping, but database-level spatial indexing (GiST) scales to tens of thousands of records.
-2. **Eliminates Client-Side Rate Limits & Agency Outages:** If the NWS or TxDOT servers suffer transient downtime or rate-limit client IPs, Supabase reliably serves the latest cached snapshot with timestamps.
-3. **Automated Expiration & Historical Retention:** Dedicated Python background workers can mark expired alerts, track historical timelines, and archive past disaster trajectories.
-4. **Single Frontend Endpoint:** The map connects to a unified route (e.g., `/api/hazards?bbox=...`) that returns all layers formatted to our `UnifiedHazard` contract.
+Open `http://localhost:3000/test-map`. See [`documentation/API_Setup.md`](../../../documentation/API_Setup.md) for `.env.local` setup.

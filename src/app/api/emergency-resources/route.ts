@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -7,6 +5,7 @@ import {
   getResourceGroupForOsmType,
   metersToMiles,
 } from "@/lib/community-resources";
+import { getPublicSupabaseConfig, supabasePublicHeaders } from "@/lib/supabase-public";
 import type { EmergencyResource, EmergencyResourceType } from "@/types/hazard";
 
 interface RawSupabaseResourceRow {
@@ -19,70 +18,6 @@ interface RawSupabaseResourceRow {
   dist_meters: number;
   lon: number;
   lat: number;
-}
-
-let cachedWorkerEnv: Record<string, string> | null = null;
-
-function readFallbackServerEnv(): Record<string, string> {
-  if (cachedWorkerEnv) return cachedWorkerEnv;
-
-  const parsed: Record<string, string> = {};
-  const candidates = [
-    path.join(process.cwd(), ".env.local"),
-    path.join(process.cwd(), ".env"),
-    path.join(process.cwd(), "workers", "emergency_resources", ".env"),
-    path.join(process.cwd(), "workers", "bluesky", ".env"),
-  ];
-
-  for (const filePath of candidates) {
-    try {
-      if (!fs.existsSync(filePath)) continue;
-      const content = fs.readFileSync(filePath, "utf8");
-      for (const line of content.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx <= 0) continue;
-        const key = trimmed.slice(0, eqIdx).trim();
-        let value = trimmed.slice(eqIdx + 1).trim();
-        if (
-          (value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))
-        ) {
-          value = value.slice(1, -1);
-        }
-        if (key && value && !parsed[key]) {
-          parsed[key] = value;
-        }
-      }
-    } catch {
-      // Ignore unreadable env files
-    }
-  }
-
-  cachedWorkerEnv = parsed;
-  return parsed;
-}
-
-function getSupabaseCredentials(): { url: string; key: string } | null {
-  const fallback = readFallbackServerEnv();
-  const url =
-    process.env.SUPABASE_URL ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    fallback.SUPABASE_URL ||
-    fallback.NEXT_PUBLIC_SUPABASE_URL;
-
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    fallback.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    fallback.SUPABASE_ANON_KEY ||
-    fallback.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key) return null;
-  return { url: url.replace(/\/+$/, ""), key };
 }
 
 export async function GET(request: NextRequest) {
@@ -128,23 +63,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ resources: [], totalRaw: 0 });
   }
 
-  const creds = getSupabaseCredentials();
+  const creds = getPublicSupabaseConfig();
   if (!creds) {
     return NextResponse.json(
       {
         error:
-          "Supabase credentials are not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY.",
+          "Supabase public credentials are not configured. Set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY.",
       },
       { status: 503 },
     );
   }
 
   const rpcEndpoint = `${creds.url}/rest/v1/rpc/get_nearby_emergency_resources`;
-  const headers = {
-    apikey: creds.key,
-    Authorization: `Bearer ${creds.key}`,
-    "Content-Type": "application/json",
-  };
+  const headers = supabasePublicHeaders(creds.key);
 
   try {
     // 1. Try the upgraded RPC signature first

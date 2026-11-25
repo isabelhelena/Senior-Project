@@ -12,11 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Vendored bundles and local worker runtime artifacts are not source.
+    // Vendored bundles and local worker/test runtime artifacts are not source.
     "public/maplibre-gl-*.mjs",
     "workers/**/data/**",
     "**/.venv/**",
     ".npm-cache/**",
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 
