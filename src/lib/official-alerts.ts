@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
+import { getPublicSupabaseConfig, supabasePublicHeaders } from "./supabase-public";
 
 /** Server-side read access through a narrowly scoped public RPC. */
 export async function officialAlerts(source: "nws" | "txdot") {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) {
+  const config = getPublicSupabaseConfig();
+  if (!config) {
     return NextResponse.json({ error: "Stored alerts are not configured." }, { status: 503 });
   }
   try {
-    const response = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/read_official_alerts`, {
+    const response = await fetch(`${config.url}/rest/v1/rpc/read_official_alerts`, {
       method: "POST",
-      headers: { apikey: key, "Content-Type": "application/json" },
+      headers: supabasePublicHeaders(config.key),
       body: JSON.stringify({ p_source: source }),
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),

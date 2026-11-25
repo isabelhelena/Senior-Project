@@ -77,7 +77,7 @@ async function reverseGeocode(latParam: string | null, lngParam: string | null) 
   }
 
   const headers = {
-    'User-Agent': '(LoneStarSupport-Testing, contact@lonestarsupport.org)',
+    'User-Agent': process.env.NWS_USER_AGENT || 'LoneStarSupport/1.0',
     'Accept': 'application/geo+json',
   };
 

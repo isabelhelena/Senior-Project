@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
 import { NextResponse } from "next/server";
+import { getPublicSupabaseConfig, supabasePublicHeaders } from "./supabase-public";
 
 const MAX_REQUEST_BYTES = 8 * 1024;
 const UNAVAILABLE_MESSAGE = "Community reports are temporarily unavailable. Please try again.";
@@ -89,16 +90,14 @@ export function submissionIdentity(request: Request) {
 }
 
 export function supabaseConfig() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) throw new ReportError(503, "Community reports are not configured.");
-  return { url: url.replace(/\/$/, ""), key };
+  const config = getPublicSupabaseConfig();
+  if (!config) throw new ReportError(503, "Community reports are not configured.");
+  return config;
 }
 
 export async function reportRpc(name: string, body: Record<string, unknown>, token?: string) {
   const { url, key } = supabaseConfig();
-  const headers: Record<string, string> = { apikey: key, "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = supabasePublicHeaders(key, token);
 
   const response = await fetch(`${url}/rest/v1/rpc/${name}`, {
     method: "POST",

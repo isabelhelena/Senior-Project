@@ -1,14 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useLocation } from '@/context/LocationContext';
 import { WeatherSummaryCard } from '@/components/WeatherSummaryCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, RefreshCw, AlertCircle, MapPin, Search } from 'lucide-react';
+import { Loader2, RefreshCw, AlertCircle, MapPin, Search, Map as MapIcon, TriangleAlert } from 'lucide-react';
 
 interface GeoJsonFeature {
   type: string;
@@ -151,13 +152,23 @@ export default function DiagnosticsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Phase 2 Ingestion Diagnostics</h1>
           <p className="text-muted-foreground text-sm">
-            Verifying localized point-radius telemetry for the active coordinates[cite: 2].
+            Inspecting stored statewide NWS/TxDOT snapshots and live local weather observations.
           </p>
         </div>
-        <Button onClick={testAll} disabled={nws.loading || txdot.loading} className="gap-2">
-          {nws.loading || txdot.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Probe Localized Feeds
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/test-map" className={buttonVariants({ variant: 'outline' })}>
+            <MapIcon className="h-4 w-4 mr-1.5" />
+            Crisis Map
+          </Link>
+          <Link href="/report" className={buttonVariants({ variant: 'outline' })}>
+            <TriangleAlert className="h-4 w-4 mr-1.5" />
+            Report Incident
+          </Link>
+          <Button onClick={testAll} disabled={nws.loading || txdot.loading} className="gap-2">
+            {nws.loading || txdot.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Probe Stored Feeds
+          </Button>
+        </div>
       </div>
 
       {/* Diagnostics Grid including WeatherSummaryCard */}
@@ -249,7 +260,7 @@ export default function DiagnosticsPage() {
                 {nws.data?.features && nws.data.features.length > 0
                   ? JSON.stringify(nws.data.features[0], null, 2)
                   : nws.status === 'success'
-                  ? 'No active weather alerts currently impacting these exact coordinates.'
+                  ? 'No active weather alerts in the stored statewide snapshot.'
                   : 'Run test to inspect payload.'}
               </pre>
             </TabsContent>
@@ -258,7 +269,7 @@ export default function DiagnosticsPage() {
                 {txdot.data?.features && txdot.data.features.length > 0
                   ? JSON.stringify(txdot.data.features[0], null, 2)
                   : txdot.status === 'success'
-                  ? 'No non-open roadway incidents found within a 25-mile radius.'
+                  ? 'No active roadway conditions in the stored statewide snapshot.'
                   : 'Run test to inspect payload.'}
               </pre>
             </TabsContent>

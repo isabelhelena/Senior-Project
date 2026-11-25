@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const lng = searchParams.get('lng') || '-98.4936';
 
     const headers = {
-      'User-Agent': '(LoneStarSupport-Testing, contact@lonestarsupport.org)',
+      'User-Agent': process.env.NWS_USER_AGENT || 'LoneStarSupport/1.0',
       'Accept': 'application/geo+json',
     };
 

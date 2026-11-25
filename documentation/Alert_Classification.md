@@ -27,8 +27,9 @@ Use `normalizeSocialAlert` after decoding a social record's field names and
 coordinates, before giving it to map components. Map fixtures already use this
 adapter. A future live social endpoint must use it too; live social fetching is
 not added by this change. The report validator returns canonical `category` and
-`urgency`, with original choices retained in `sourceClassification`; the report
-form still does not persist submissions.
+`urgency`, with original choices retained in `sourceClassification`; `/report`
+submits normalized payloads to `POST /api/community-reports` for moderation, and
+`normalizeCommunityReport` adapts approved rows for the map.
 
 Bluesky extraction rules, stored source records, and database enums are unchanged.
 If more specific application categories are needed later, extend the vocabulary

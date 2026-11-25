@@ -1,111 +1,42 @@
-# Data routes and ingestion
+# Next.js API Routes & Environment Setup
 
-Official alerts follow `NWS / TxDOT ? Python worker ? Supabase ? Next.js ? map`.
-The worker runs once by default, with optional ten-minute polling controlled by
-`workers/official/polling.ps1`. See [setup and controls](../workers/official/README.md).
+Next.js serves read-only stored telemetry, PostGIS spatial queries, NWS point observations, geocoding, and community report submission/moderation routes under `src/app/api/`. Data ingestion into Supabase runs in separate Python workers under `workers/`.
 
-| Route | Data source | Parameters | Output |
-| --- | --- | --- | --- |
-| `/api/alerts` | Supabase `public_alerts` | None | Statewide stored NWS GeoJSON, fetch time, stale flag |
-| `/api/road-conditions` | Supabase `public_alerts` | None | Statewide stored TxDOT GeoJSON, fetch time, stale flag |
-| `/api/weather-current` | NWS points/stations | `lat`, `lng` | Latest observation near the selected location |
-| `/api/geocode` | Zippopotam.us | `zip` | City/state and coordinates |
+## Route handlers
 
-Official alert routes do not apply location/radius parameters or contact the
-providers. Source failures retain the previous database snapshot. Missing setup
-or an unavailable database returns 503; stale snapshots are explicitly labeled.
+| Route | Method(s) | Data source | Parameters / payload | Response & caching |
+| --- | --- | --- | --- | --- |
+| `/api/alerts` | `GET` | Supabase RPC `read_official_alerts('nws')` | None | Statewide NWS GeoJSON `FeatureCollection`, `fetchedAt`, `stale` (`Cache-Control: no-store`) |
+| `/api/road-conditions` | `GET` | Supabase RPC `read_official_alerts('txdot')` | None | Statewide TxDOT GeoJSON `FeatureCollection`, `fetchedAt`, `stale` (`Cache-Control: no-store`) |
+| `/api/emergency-resources` | `GET` | Supabase RPC `get_nearby_emergency_resources` | Required: `lat`, `lng`. Optional: `radiusMeters` (`3000`–`65000`, default `25000`), `types` (comma-separated), `q`, `includeUnnamed` (`true`/`false`), `limit` (`10`–`500`, default `250`) | Deduplicated nearby OpenStreetMap `EmergencyResource[]` (`next: { revalidate: 120 }`) |
+| `/api/community-reports` | `GET` | Supabase RPC `read_community_reports` | Optional: `bbox=west,south,east,north` (default Texas box, max `15` degrees per axis) | Approved, unexpired community reports from the last 24 hours (`Cache-Control: no-store`) |
+| `/api/community-reports` | `POST` | Supabase RPC `submit_community_report` | JSON (max 8 KiB): `category`, `severity`, `description`, `latitude`, `longitude`, `locationSource`, `locationStatus`, `submissionId` (UUID v4) | Pending report receipt (`201`) with `Cache-Control: no-store` |
+| `/api/moderation/session` | `POST`, `DELETE` | Supabase Auth `/auth/v1/token` + `list_community_report_queue` | `POST`: `{ email, password }`; `DELETE`: clears cookie | Sets/clears `HttpOnly`, `SameSite=Strict`, `Secure` (prod) `lss_moderator` cookie scoped to `/api/moderation` |
+| `/api/moderation/reports` | `GET`, `PATCH` | Supabase RPCs `list_community_report_queue`, `moderate_community_report` | `GET`: `status`, `page` (50/page); `PATCH`: `{ id, status, expectedStatus, notes }` | Queue listing or decision receipt (`Cache-Control: no-store`) |
+| `/api/weather-current` | `GET` | NWS `/points`, `/stations`, `/observations/latest` | `lat`, `lng` (defaults to San Antonio `29.4241`, `-98.4936`) | Ambient temperature (`tempF`), `condition`, `windMph`, `windDirection`, `humidity`, `stationName` |
+| `/api/geocode` | `GET` | Zippopotam.us (forward) or NWS `/points` + `/county` (reverse) | Either `zip` (5 digits) or `lat` + `lng` | `{ city, state, lat, lng }` (`revalidate: 2592000` for ZIP, `86400` for NWS reverse geocode) |
 
-The worker resolves missing NWS polygons using affected-zone boundaries. TxDOT
-open-to-traffic, artificial-centerline, and proposed records are excluded.
-Expired official alerts are hidden on read and deleted during worker runs.
+## Environment configuration (`.env.local`)
 
-The map normalizes stored GeoJSON into `UnifiedHazard` for MapLibre. Its refresh
-button and visible-tab timer reread storage without starting a worker. Location
-selection affects map navigation and current weather, not ingestion coverage.
-`/test-feed` inspects these stored statewide feeds.
+Copy root [`.env.example`](../.env.example) to `.env.local` for local development. Next.js loads `.env.local` and `.env` automatically.
 
-Credentials belong in ignored environment files: the service-role key only in
-`workers/official/.env`, and the publishable key in root `.env.local`. The existing
-Bluesky worker and its demo retain their separate configuration and storage flow.
-=======
-### Upstream Sources
-* **National Weather Service (NWS / NOAA):** Authoritative public-domain meteorological alerts and point observation telemetry.
-* **Texas Department of Transportation (TxDOT):** Real-time roadway closures, flood blockages, and traffic restrictions.
-* **Zippopotam.us:** Free, keyless postal code geocoding API to resolve 5-digit US ZIP codes to latitude and longitude.
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `SUPABASE_URL` | For alerts, resources, reports | Supabase project URL (`https://...`, or loopback `http://` for local dev). `NEXT_PUBLIC_SUPABASE_URL` is also accepted by the public helper. |
+| `SUPABASE_PUBLISHABLE_KEY` | For alerts, resources, reports | Non-privileged Supabase publishable key (legacy `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` with JWT `role: "anon"` is also accepted). |
+| `NWS_USER_AGENT` | Optional | Custom `User-Agent` sent to `api.weather.gov` by `/api/weather-current` and `/api/geocode` (defaults to `LoneStarSupport/1.0`). |
+| `COMMUNITY_REPORT_SECRET` | For `/report` submissions | Secret shared with `community_report_config.submission_secret_hash` (min 32 chars) for HMAC-SHA256 IP hashing and RPC authorization. |
+| `REPORT_CLIENT_IP_HEADER` | Production `/report` | Single trusted proxy IP header (e.g. `cf-connecting-ip`). Leave unset in local dev; production submissions fail closed (`503`) if missing. |
+| `APP_ORIGIN` | Production `/report` & `/moderation` | Exact canonical public origin without trailing slash (e.g. `https://example.org`) checked by `requireSameOrigin`. |
 
-### Next.js Internal Route Handlers
-| Route Endpoint | Upstream Target | Query Parameters | Role / Output |
-| :--- | :--- | :--- | :--- |
-| `/api/alerts` | NWS `/alerts/active` | `lat`, `lng` | Fetches active meteorological warnings and watches impacting the coordinates. |
-| `/api/road-conditions` | TxDOT ArcGIS FeatureServer | `lat`, `lng`, `radius` | Returns active road closures within an envelope bounding box as GeoJSON `LineString` features. |
-| `/api/weather-current` | NWS `/points` & `/stations` | `lat`, `lng` | Resolves the nearest station to return ambient conditions (temp, wind, humidity, weather text). |
-| `/api/geocode` | Zippopotam.us | `zip` | Resolves a 5-digit ZIP code to `{ lat, lng, city, state }` for map overrides. |
+### Key safety rules
 
----
+- [`src/lib/supabase-public.ts`](../src/lib/supabase-public.ts) resolves Supabase credentials exclusively from `process.env` and never reads worker `.env` files or `SUPABASE_SERVICE_ROLE_KEY`.
+- Any key starting with `sb_secret_`, containing `service_role`, matching `SUPABASE_SERVICE_ROLE_KEY`, or using a JWT whose `role` claim is not `"anon"` is rejected (`503`).
+- `sb_publishable_*` keys are sent via `apikey` only (never `Authorization: Bearer`) unless a user session token or legacy JWT anon key is supplied.
 
-## 3. Key Architectural Decisions
+## Error & staleness behavior
 
-* **Dropped OpenWeather:** Removed commercial APIs to eliminate rate limits, paid subscription tiers, and API key management, keeping the project within its mandatory $0.00 budget.
-* **TxDOT Filter Hardening:** Restricted ArcGIS queries using:
-  ```sql
-  RDWAY_STAT <> 'Open to Traffic (All Data Input)' AND RDWAY_STAT NOT LIKE '%Proposed%'
-  ```
-  This prevents unbuilt or planned future highways (such as SH-68) from rendering as active road closures.
-* **Handling NWS `geometry: null`:** NWS county advisories, heat alerts, and winter watches omit explicit polygon arrays. These are handled via text summary cards and sidebar drawers rather than breaking vector layer renderers.
-* **Spatial Envelope Queries:** Replaced statewide downloads with localized bounding box checks (`esriSpatialRelIntersects`) to keep payload sizes under the 1.5MB project threshold.
-
----
-
-## 4. State Management: `LocationContext`
-
-The `LocationContext` (`src/context/LocationContext.tsx`) provides centralized coordinate tracking across the platform:
-
-* **Auto-GPS Detection:** Requests browser coordinates via `navigator.geolocation` on mount.
-* **Asynchronous Execution:** Defers fallback execution using `queueMicrotask` to avoid React cascading render warnings (`setState` inside synchronous effects).
-* **Local Caching:** Caches the last verified coordinate set in `localStorage` under `lss_cached_loc`.
-* **Manual Override:** Allows typing a 5-digit ZIP code to jump to any Texas city.
-* **Fallback Anchor:** Defaults to San Antonio Downtown (`29.4241, -98.4936`) if permissions are rejected or unavailable.
-
----
-
-## 5. UI Components Implemented
-
-### `WeatherSummaryCard` (`src/components/WeatherSummaryCard.tsx`)
-* Receives `lat` and `lng` props directly from `LocationContext`.
-* Queries `/api/weather-current` to display:
-  * Current temperature in Fahrenheit (°F).
-  * Weather condition icon (Rain, Lightning, Sun, Clouds).
-  * Wind speed (mph) and heading angle (°).
-  * Relative humidity percentage (%).
-  * Name of the reporting NWS observation station.
-
-### Diagnostic Test Suite (`src/app/test-feeds/page.tsx`)
-* Live coordinate bar displaying current location, source (`gps`, `zip`, or `fallback`), and manual ZIP input form.
-* Direct probe buttons for testing NWS point alerts and TxDOT 25-mile roadway conditions.
-* Real-time GeoJSON payload inspector tabs to inspect feature attributes and geometry before rendering to MapLibre GL.
-
----
-
-## 6. Directory Layout
-
-```text
-src/
-├── app/
-│   ├── api/
-│   │   ├── alerts/
-│   │   │   └── route.ts             # Localized NWS alert proxy
-│   │   ├── geocode-zip/
-│   │   │   └── route.ts             # Zero-cost postal geocoder
-│   │   ├── road-conditions/
-│   │   │   └── route.ts             # TxDOT ArcGIS spatial proxy
-│   │   └── weather-current/
-│   │       └── route.ts             # NWS ambient observation station parser
-│   ├── test-feeds/
-│   │   └── page.tsx                 # Diagnostic telemetry test harness
-│   └── layout.tsx                   # Global layout wrapped in LocationProvider
-├── components/
-│   ├── DisasterMap.tsx              # MapLibre GL vector canvas component
-│   └── WeatherSummaryCard.tsx       # Live ambient weather card
-└── context/
-    └── LocationContext.tsx          # Geolocation state & storage
-```
+- Official alert endpoints (`/api/alerts`, `/api/road-conditions`) do not accept location parameters and never contact NWS/TxDOT directly; if Supabase is unconfigured or the initial worker run has not completed (`fetchedAt` is null), they return `503`.
+- Stored snapshots older than 30 minutes are flagged `stale: true` by `read_official_alerts`, while expired rows (`expires_at <= now()`) are filtered out on read and deleted on the next worker run.
+- Community report endpoints hide internal database errors behind sanitized `503` responses, except mapped domain errors (`400` validation/Texas bounds, `401`/`403` auth & origin, `409` idempotency or optimistic lock conflict, `413` > 8 KiB body, `415` non-JSON, `429` 5/hour rate limit with `Retry-After: 3600`).
