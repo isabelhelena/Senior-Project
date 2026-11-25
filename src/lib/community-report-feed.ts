@@ -31,7 +31,7 @@ export function normalizeCommunityReport(feature: Feature<Point, StoredReportPro
     externalId: report.report_id,
     headline: `Reviewed community report: ${categoryLabel}`,
     description: report.description,
-    instruction: "Reviewed for publication. This community report has not been independently verified.",
+    instruction: "Approved by a moderator. This is a community-submitted report.",
     hasGeometry: true,
     geometry: feature.geometry,
     createdAt: report.created_at,

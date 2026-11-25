@@ -292,7 +292,7 @@ export function HazardDrawer({
             <div className="rounded-2xl border border-destructive/25 bg-destructive/10 p-3.5 text-destructive dark:text-red-300">
               <div className="flex items-center gap-1.5 text-xs font-semibold">
                 <ShieldAlert className="size-4 shrink-0" aria-hidden="true" />
-                Recommended action
+                {hazard.source === "community" ? "Community notice" : "Recommended action"}
               </div>
               <p className="mt-1.5 text-xs leading-relaxed">
                 {hazard.instruction}

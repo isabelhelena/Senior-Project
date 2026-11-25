@@ -217,7 +217,7 @@ export function MapInformationPanel({
           <div className="space-y-5">
             <section className="space-y-3">
               <h3 className="text-sm font-semibold">Reviewed submissions</h3>
-              <p className="text-xs text-muted-foreground">Reviewed for publication; reports have not been independently verified.</p>
+              <p className="text-xs text-muted-foreground">Approved by a moderator; community reports have not been independently verified.</p>
               {approvedSubmissions.length === 0 && <EmptyState label="No approved submissions in the last 24 hours." />}
               {approvedSubmissions.map((hazard) => (
                 <article key={hazard.id} className="space-y-2 rounded-2xl bg-muted/65 p-3.5">
